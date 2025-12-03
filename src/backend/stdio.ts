@@ -119,7 +119,7 @@ export class StdioBackend extends BaseBackend {
 
   private async cleanup(): Promise<void> {
     // Reject all pending requests
-    for (const [_id, pending] of this.pendingRequests) {
+    for (const [, pending] of this.pendingRequests) {
       clearTimeout(pending.timeout);
       pending.reject(new Error('Backend disconnected'));
     }

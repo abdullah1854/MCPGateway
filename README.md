@@ -94,6 +94,21 @@ npm start
 
 The gateway will start on `http://localhost:3010` by default.
 
+#### Security modes
+
+For local experimentation you can run without auth:
+
+- `AUTH_MODE=none`
+
+However, **sensitive endpoints** (`/dashboard`, `/dashboard/api/*`, `/api/code/*`, `/metrics/json`) are blocked by default when `AUTH_MODE=none`. To allow unauthenticated access (not recommended except for isolated local use), explicitly opt in:
+
+- `ALLOW_INSECURE=1`
+
+For secure usage, prefer:
+
+- `AUTH_MODE=api-key` with `API_KEYS=key1,key2`
+- or `AUTH_MODE=oauth` with the appropriate `OAUTH_*` settings shown below.
+
 ## Endpoints
 
 ### Core Endpoints
@@ -364,7 +379,9 @@ docker-compose down
 | `OAUTH_ISSUER` | - | OAuth token issuer |
 | `OAUTH_AUDIENCE` | - | OAuth audience |
 | `OAUTH_JWKS_URI` | - | OAuth JWKS endpoint |
-| `CORS_ORIGINS` | `*` | Allowed CORS origins |
+| `CORS_ORIGINS` | `http://localhost:3010,http://127.0.0.1:3010` | Allowed CORS origins (`*` to allow all) |
+| `HEALTH_REQUIRE_BACKENDS` | `0` | If `1`, `/health` returns `503` when all configured backends are down |
+| `ALLOW_INSECURE` | `0` | If `1`, allow unauthenticated access to dashboard, code APIs, and JSON metrics when `AUTH_MODE=none` |
 | `RATE_LIMIT_WINDOW_MS` | `60000` | Rate limit window (ms) |
 | `RATE_LIMIT_MAX_REQUESTS` | `100` | Max requests per window |
 

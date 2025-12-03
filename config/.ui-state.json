@@ -169,7 +169,25 @@
     "mssql_sandbox_stg_disconnect_database",
     "mssql_sandbox_stg_get_table_data",
     "mssql_sandbox_stg_execute_procedure",
-    "mssql_sandbox_stg_list_databases"
+    "mssql_sandbox_stg_list_databases",
+    "mssql_prod_connect_database",
+    "mssql_prod_execute_query",
+    "mssql_prod_get_schema",
+    "mssql_prod_describe_table",
+    "mssql_prod_connection_status",
+    "mssql_prod_disconnect_database",
+    "mssql_prod_get_table_data",
+    "mssql_prod_execute_procedure",
+    "mssql_prod_list_databases",
+    "mssql_sandbox_prod_connect_database",
+    "mssql_sandbox_prod_execute_query",
+    "mssql_sandbox_prod_get_schema",
+    "mssql_sandbox_prod_describe_table",
+    "mssql_sandbox_prod_connection_status",
+    "mssql_sandbox_prod_disconnect_database",
+    "mssql_sandbox_prod_get_table_data",
+    "mssql_sandbox_prod_execute_procedure",
+    "mssql_sandbox_prod_list_databases"
   ],
   "disabledBackends": [
     "filesystem",
@@ -178,6 +196,8 @@
     "mssql-crm-dev",
     "mssql-crm-prod",
     "mssql-corporateforms",
-    "mssql-sandbox-staging"
+    "mssql-sandbox-staging",
+    "mssql-prod",
+    "mssql-sandbox-prod"
   ]
 }

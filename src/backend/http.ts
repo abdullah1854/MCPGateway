@@ -136,6 +136,10 @@ export class HttpBackend extends BaseBackend {
   }
 
   private async executeRequest(request: MCPRequest): Promise<MCPResponse> {
+    const timeoutMs = this.config.timeout;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), timeoutMs);
+
     const headers: Record<string, string> = {
       'Content-Type': 'application/json',
       'Accept': 'application/json, text/event-stream',
@@ -156,7 +160,7 @@ export class HttpBackend extends BaseBackend {
           method: 'POST',
           headers,
           body: JSON.stringify(request),
-          signal: this.abortController?.signal,
+          signal: controller.signal,
           keepalive: true,
         });
 
@@ -195,6 +199,7 @@ export class HttpBackend extends BaseBackend {
       }
     }
 
+    clearTimeout(timeout);
     throw lastError ?? new Error('Request failed');
   }
 

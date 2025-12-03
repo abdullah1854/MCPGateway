@@ -36,6 +36,8 @@ export class MetricsCollector {
   private backendMetrics = new Map<string, BackendMetrics>();
   private requestCount = 0;
   private errorCount = 0;
+  private authFailureCount = 0;
+  private rateLimitExceededCount = 0;
   private startTime = Date.now();
   private maxHistorySize = 10000;
 
@@ -105,6 +107,20 @@ export class MetricsCollector {
     if (isError) {
       this.errorCount++;
     }
+  }
+
+  /**
+   * Record an authentication failure
+   */
+  recordAuthFailure(): void {
+    this.authFailureCount++;
+  }
+
+  /**
+   * Record a rate limit hit
+   */
+  recordRateLimitExceeded(): void {
+    this.rateLimitExceededCount++;
   }
 
   /**
@@ -189,6 +205,16 @@ export class MetricsCollector {
     lines.push(`mcp_gateway_errors_total ${this.errorCount}`);
 
     lines.push('');
+    lines.push('# HELP mcp_gateway_auth_failures_total Total number of authentication failures');
+    lines.push('# TYPE mcp_gateway_auth_failures_total counter');
+    lines.push(`mcp_gateway_auth_failures_total ${this.authFailureCount}`);
+
+    lines.push('');
+    lines.push('# HELP mcp_gateway_rate_limit_exceeded_total Total number of rate limit violations');
+    lines.push('# TYPE mcp_gateway_rate_limit_exceeded_total counter');
+    lines.push(`mcp_gateway_rate_limit_exceeded_total ${this.rateLimitExceededCount}`);
+
+    lines.push('');
     lines.push('# HELP mcp_gateway_error_rate Current error rate');
     lines.push('# TYPE mcp_gateway_error_rate gauge');
     lines.push(`mcp_gateway_error_rate ${this.getErrorRate()}`);
@@ -257,6 +283,8 @@ export class MetricsCollector {
     requestCount: number;
     errorCount: number;
     errorRate: number;
+    authFailures: number;
+    rateLimitExceeded: number;
     backends: Record<string, BackendMetrics>;
     latency: { p50: number; p90: number; p95: number; p99: number };
   } {
@@ -265,6 +293,8 @@ export class MetricsCollector {
       requestCount: this.requestCount,
       errorCount: this.errorCount,
       errorRate: this.getErrorRate(),
+      authFailures: this.authFailureCount,
+      rateLimitExceeded: this.rateLimitExceededCount,
       backends: Object.fromEntries(this.backendMetrics),
       latency: this.getLatencyPercentiles(),
     };
@@ -278,6 +308,8 @@ export class MetricsCollector {
     this.backendMetrics.clear();
     this.requestCount = 0;
     this.errorCount = 0;
+    this.authFailureCount = 0;
+    this.rateLimitExceededCount = 0;
     this.startTime = Date.now();
   }
 }

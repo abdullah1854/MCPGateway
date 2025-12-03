@@ -57,7 +57,29 @@ export function createAuthMiddleware(config: GatewayConfig) {
   return async (req: AuthenticatedRequest, res: Response, next: NextFunction) => {
     const authMode = config.auth.mode;
 
+    // Security gate for sensitive endpoints when AUTH_MODE=none.
+    // By default, dashboard, code-execution API, and JSON metrics are NOT
+    // accessible without auth unless explicitly opted in via ALLOW_INSECURE=1.
     if (authMode === 'none') {
+      const path = req.path || '';
+      const isSensitiveEndpoint =
+        path === '/dashboard' ||
+        path.startsWith('/dashboard/api') ||
+        path.startsWith('/api/code') ||
+        path === '/metrics/json';
+
+      const allowInsecure = process.env.ALLOW_INSECURE === '1';
+
+      if (isSensitiveEndpoint && !allowInsecure) {
+        return res.status(503).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32000,
+            message: 'Gateway is running without authentication. Configure AUTH_MODE or set ALLOW_INSECURE=1 to allow unauthenticated access to this endpoint.',
+          },
+        });
+      }
+
       return next();
     }
 

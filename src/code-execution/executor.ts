@@ -343,6 +343,12 @@ export class CodeExecutor {
 
   /**
    * Execute code in a sandboxed environment with access to MCP tools
+   *
+   * Threat model (high level):
+   * - Prevent access to host process (no process, require, globalThis, etc.)
+   * - Prevent dynamic code generation (no eval / Function / AsyncFunction)
+   * - Make common constructor-based escape patterns fail safely
+   * - Bound execution time and output size to reduce DoS risk
    */
   async execute(code: string, options: ExecutionOptions = {}): Promise<ExecutionResult> {
     const {
@@ -556,9 +562,10 @@ export class CodeExecutor {
         return 'number';
       case 'boolean':
         return 'boolean';
-      case 'array':
+      case 'array': {
         const items = schema.items as Record<string, unknown> | undefined;
         return items ? `${this.schemaToType(items)}[]` : 'any[]';
+      }
       case 'object':
         return 'Record<string, any>';
       default:

@@ -34,6 +34,8 @@ export default [
       'no-unused-vars': 'off',
       '@typescript-eslint/no-unused-vars': ['error', { argsIgnorePattern: '^_' }],
       'no-undef': 'off',
+      // Keep rules lightweight (no type-aware rules in flat config for now)
+      '@typescript-eslint/consistent-type-imports': 'off',
     },
   },
   {

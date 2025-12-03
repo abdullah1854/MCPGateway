@@ -64,11 +64,38 @@ export function substituteEnvVarsDeep<T>(obj: T): T {
  * Load gateway configuration from environment
  */
 export function loadGatewayConfig(): GatewayConfig {
+  const port = parseInt(process.env.PORT ?? '3010', 10);
+  const host = process.env.HOST ?? '0.0.0.0';
+  const name = process.env.GATEWAY_NAME ?? 'mcp-gateway';
+  const logLevel = process.env.LOG_LEVEL ?? 'info';
+
+  // Derive CORS origins:
+  // - Default: restrict to localhost for safer out-of-the-box behavior
+  // - CORS_ORIGINS="*" → allow all
+  // - CORS_ORIGINS="http://a,http://b" → explicit list
+  const rawCorsOrigins = process.env.CORS_ORIGINS;
+  let corsOrigins: string | string[];
+
+  if (!rawCorsOrigins || rawCorsOrigins.trim() === '') {
+    const localOrigin = `http://localhost:${port}`;
+    const loopbackOrigin = `http://127.0.0.1:${port}`;
+    corsOrigins = [localOrigin, loopbackOrigin];
+  } else if (rawCorsOrigins === '*') {
+    corsOrigins = '*';
+  } else if (rawCorsOrigins.includes(',')) {
+    corsOrigins = rawCorsOrigins
+      .split(',')
+      .map(origin => origin.trim())
+      .filter(origin => origin.length > 0);
+  } else {
+    corsOrigins = [rawCorsOrigins.trim()];
+  }
+
   const config = {
-    port: parseInt(process.env.PORT ?? '3010', 10),
-    host: process.env.HOST ?? '0.0.0.0',
-    name: process.env.GATEWAY_NAME ?? 'mcp-gateway',
-    logLevel: process.env.LOG_LEVEL ?? 'info',
+    port,
+    host,
+    name,
+    logLevel,
     auth: {
       mode: process.env.AUTH_MODE ?? 'none',
       apiKeys: process.env.API_KEYS?.split(',').map(k => k.trim()).filter(Boolean),
@@ -79,7 +106,7 @@ export function loadGatewayConfig(): GatewayConfig {
       },
     },
     cors: {
-      origins: process.env.CORS_ORIGINS ?? '*',
+      origins: corsOrigins,
     },
     rateLimit: {
       windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS ?? '60000', 10),

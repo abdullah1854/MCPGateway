@@ -32,6 +32,8 @@ export class BackendManager extends EventEmitter {
   private promptToBackend = new Map<string, string>();
   private disabledTools = new Set<string>();
   private disabledBackends = new Set<string>();
+  private reconnectTimers = new Map<string, NodeJS.Timeout>();
+  private reconnectAttempts = new Map<string, number>();
 
   constructor() {
     super();
@@ -69,15 +71,25 @@ export class BackendManager extends EventEmitter {
     backend.on('connected', () => {
       this.updateMappings();
       this.emit('backendConnected', config.id);
+      // Reset reconnect attempts on successful connection
+      const timer = this.reconnectTimers.get(config.id);
+      if (timer) {
+        clearTimeout(timer);
+        this.reconnectTimers.delete(config.id);
+      }
+      this.reconnectAttempts.delete(config.id);
     });
 
     backend.on('disconnected', () => {
       this.updateMappings();
       this.emit('backendDisconnected', config.id);
+       // Schedule reconnect for enabled backends
+      this.scheduleReconnect(config.id, config);
     });
 
     backend.on('error', (error) => {
       this.emit('backendError', config.id, error);
+      this.scheduleReconnect(config.id, config);
     });
 
     backend.on('toolsChanged', () => {
@@ -108,6 +120,58 @@ export class BackendManager extends EventEmitter {
   }
 
   /**
+   * Schedule a reconnect with exponential backoff for a given backend.
+   * Backoff is capped to 30 seconds to avoid excessively long delays.
+   */
+  private scheduleReconnect(id: string, config: ServerConfig): void {
+    // Skip if backend is disabled or not enabled in config
+    if (this.disabledBackends.has(id) || !config.enabled) {
+      return;
+    }
+
+    const backend = this.backends.get(id);
+    if (!backend || backend.status === 'connected' || backend.status === 'connecting') {
+      return;
+    }
+
+    // Avoid multiple timers for the same backend
+    if (this.reconnectTimers.has(id)) {
+      return;
+    }
+
+    const attempt = (this.reconnectAttempts.get(id) ?? 0) + 1;
+    this.reconnectAttempts.set(id, attempt);
+
+    const baseDelayMs = 1000;
+    const maxDelayMs = 30000;
+    const delay = Math.min(baseDelayMs * Math.pow(2, attempt - 1), maxDelayMs);
+
+    logger.warn(`Scheduling reconnect for backend ${id} in ${delay}ms (attempt ${attempt})`);
+
+    const timer = setTimeout(async () => {
+      this.reconnectTimers.delete(id);
+
+      const current = this.backends.get(id);
+      if (!current || current.status === 'connected' || current.status === 'connecting') {
+        return;
+      }
+
+      try {
+        await current.connect();
+        this.reconnectAttempts.delete(id);
+      } catch (error) {
+        logger.error(`Reconnect attempt for backend ${id} failed`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        // Schedule another reconnect attempt
+        this.scheduleReconnect(id, config);
+      }
+    }, delay);
+
+    this.reconnectTimers.set(id, timer);
+  }
+
+  /**
    * Remove a backend
    */
   async removeBackend(id: string): Promise<void> {
@@ -115,6 +179,14 @@ export class BackendManager extends EventEmitter {
     if (!backend) {
       return;
     }
+
+    // Cancel any scheduled reconnects
+    const timer = this.reconnectTimers.get(id);
+    if (timer) {
+      clearTimeout(timer);
+      this.reconnectTimers.delete(id);
+    }
+    this.reconnectAttempts.delete(id);
 
     await backend.disconnect();
     this.backends.delete(id);
@@ -462,6 +534,7 @@ export class BackendManager extends EventEmitter {
     resourceCount: number;
     promptCount: number;
     error?: string;
+    lastErrorAt?: string;
   }> {
     const status: Record<string, {
       status: string;
@@ -469,15 +542,19 @@ export class BackendManager extends EventEmitter {
       resourceCount: number;
       promptCount: number;
       error?: string;
+      lastErrorAt?: string;
     }> = {};
 
     for (const [id, backend] of this.backends) {
+      // lastErrorAt is only available on BaseBackend; use runtime check to avoid type issues
+      const maybeLastErrorAt = (backend as unknown as { lastErrorAt?: Date }).lastErrorAt;
       status[id] = {
         status: backend.status,
         toolCount: backend.tools.length,
         resourceCount: backend.resources.length,
         promptCount: backend.prompts.length,
         error: backend.error,
+        lastErrorAt: maybeLastErrorAt ? maybeLastErrorAt.toISOString() : undefined,
       };
     }
 
@@ -488,6 +565,13 @@ export class BackendManager extends EventEmitter {
    * Disconnect all backends
    */
   async disconnectAll(): Promise<void> {
+    // Cancel reconnect timers
+    for (const timer of this.reconnectTimers.values()) {
+      clearTimeout(timer);
+    }
+    this.reconnectTimers.clear();
+    this.reconnectAttempts.clear();
+
     const promises = Array.from(this.backends.values()).map(backend =>
       backend.disconnect().catch(error => {
         logger.error(`Error disconnecting backend ${backend.id}`, { error });

@@ -65,6 +65,7 @@ export abstract class BaseBackend extends EventEmitter implements Backend {
   protected _resources: MCPResource[] = [];
   protected _prompts: MCPPrompt[] = [];
   protected _error: string | undefined;
+  protected _lastErrorAt: Date | undefined;
   protected _requestId = 0;
 
   constructor(config: ServerConfig) {
@@ -97,6 +98,14 @@ export abstract class BaseBackend extends EventEmitter implements Backend {
     return this._error;
   }
 
+  /**
+   * Timestamp of the last backend error, if any.
+   * Used for health reporting and reconnect strategies.
+   */
+  get lastErrorAt(): Date | undefined {
+    return this._lastErrorAt;
+  }
+
   protected setStatus(status: BackendStatus): void {
     const oldStatus = this._status;
     this._status = status;
@@ -115,6 +124,7 @@ export abstract class BaseBackend extends EventEmitter implements Backend {
   protected setError(error: Error | string): void {
     this._error = typeof error === 'string' ? error : error.message;
     this._status = 'error';
+    this._lastErrorAt = new Date();
     this.emit('error', typeof error === 'string' ? new Error(error) : error);
   }
 

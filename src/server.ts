@@ -85,6 +85,17 @@ export class MCPGatewayServer {
       });
       next();
     });
+
+    // Lightweight metrics for all HTTP requests
+    this.app.use((_req: Request, res: Response, next: NextFunction) => {
+      this.metricsCollector.recordRequest(false);
+      res.on('finish', () => {
+        if (res.statusCode >= 400) {
+          this.metricsCollector.recordRequest(true);
+        }
+      });
+      next();
+    });
   }
 
   /**
@@ -100,7 +111,7 @@ export class MCPGatewayServer {
       const enabledTools = this.backendManager.getEnabledTools();
       const metricsSummary = this.metricsCollector.getSummary();
 
-      res.json({
+      const body = {
         status: 'ok',
         gateway: this.config.name,
         backends: {
@@ -128,7 +139,19 @@ export class MCPGatewayServer {
           metrics: `http://localhost:${this.config.port}/metrics`,
           metricsJson: `http://localhost:${this.config.port}/metrics/json`,
         },
-      });
+      } as const;
+
+      // Optionally degrade health status when all backends are down.
+      const requireBackends = process.env.HEALTH_REQUIRE_BACKENDS === '1';
+      if (requireBackends && totalCount > 0 && connectedCount === 0) {
+        res.status(503).json({
+          ...body,
+          status: 'degraded',
+        });
+        return;
+      }
+
+      res.json(body);
     });
 
     // Dashboard UI
