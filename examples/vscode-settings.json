@@ -1,0 +1,21 @@
+{
+  "// MCP Gateway Configuration for VS Code Copilot": "",
+  "// Add this to your VS Code settings.json or workspace settings": "",
+  
+  "mcp.servers": {
+    "mcp-gateway": {
+      "type": "http",
+      "url": "http://localhost:3000/mcp"
+    }
+  },
+
+  "// For production with HTTPS and authentication:": "",
+  "mcp.servers.production-example": {
+    "type": "http",
+    "url": "https://your-gateway.example.com/mcp",
+    "headers": {
+      "Authorization": "Bearer your-api-key-here"
+    }
+  }
+}
+

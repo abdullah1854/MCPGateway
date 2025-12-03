@@ -1,0 +1,47 @@
+# Dependencies
+node_modules/
+
+# Claude Code settings
+.claude/
+
+# Build output
+dist/
+
+# Environment files
+.env
+.env.*
+!.env.example
+
+# Config files (contain sensitive server configurations)
+config/servers.json
+config/gateway.json
+!config/servers.example.json
+!config/gateway.example.json
+!config/*.schema.json
+
+# Logs
+*.log
+logs/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# Test coverage
+coverage/
+
+# Temporary files
+*.tmp
+*.temp
+
+# User-specific files (contain local paths)
+start.sh
+!start.example.sh
+com.mcp-gateway.plist
+!com.mcp-gateway.plist.example
+
+# Workspace (contains user session data)
+workspace/

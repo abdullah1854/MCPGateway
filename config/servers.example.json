@@ -1,0 +1,87 @@
+{
+  "$schema": "./servers.schema.json",
+  "servers": [
+    {
+      "id": "filesystem",
+      "name": "Filesystem Server",
+      "description": "Access local filesystem directories",
+      "enabled": true,
+      "transport": {
+        "type": "stdio",
+        "command": "npx",
+        "args": [
+          "-y",
+          "@modelcontextprotocol/server-filesystem",
+          "/path/to/allowed/directory1",
+          "/path/to/allowed/directory2"
+        ]
+      },
+      "toolPrefix": "fs",
+      "timeout": 30000
+    },
+    {
+      "id": "github",
+      "name": "GitHub Server",
+      "description": "GitHub API access",
+      "enabled": false,
+      "transport": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "env": {
+          "GITHUB_TOKEN": "your-github-token-here"
+        }
+      },
+      "toolPrefix": "github",
+      "timeout": 60000
+    },
+    {
+      "id": "docker-mcp",
+      "name": "Docker MCP Gateway",
+      "description": "Docker's built-in MCP gateway",
+      "enabled": false,
+      "transport": {
+        "type": "stdio",
+        "command": "docker",
+        "args": ["mcp", "gateway", "run"]
+      },
+      "toolPrefix": "docker",
+      "timeout": 60000
+    },
+    {
+      "id": "mssql-example",
+      "name": "MSSQL Database",
+      "description": "Example MSSQL database connection via Docker",
+      "enabled": false,
+      "transport": {
+        "type": "stdio",
+        "command": "docker",
+        "args": [
+          "exec",
+          "-i",
+          "your-mssql-container-name",
+          "node",
+          "node_modules/mssql-mcp/dist/index.js"
+        ]
+      },
+      "toolPrefix": "mssql",
+      "timeout": 60000
+    },
+    {
+      "id": "postgres-example",
+      "name": "PostgreSQL Database",
+      "description": "Example PostgreSQL connection",
+      "enabled": false,
+      "transport": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-postgres"],
+        "env": {
+          "DATABASE_URL": "postgresql://user:password@localhost:5432/dbname"
+        }
+      },
+      "toolPrefix": "pg",
+      "timeout": 60000
+    }
+  ]
+}

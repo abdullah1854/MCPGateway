@@ -1,0 +1,124 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "MCP Gateway Server Configuration",
+  "type": "object",
+  "required": ["servers"],
+  "properties": {
+    "servers": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "required": ["id", "name", "transport"],
+        "properties": {
+          "id": {
+            "type": "string",
+            "description": "Unique identifier for the server",
+            "pattern": "^[a-z0-9-]+$"
+          },
+          "name": {
+            "type": "string",
+            "description": "Human-readable name for the server"
+          },
+          "description": {
+            "type": "string",
+            "description": "Description of what this server provides"
+          },
+          "enabled": {
+            "type": "boolean",
+            "default": true,
+            "description": "Whether this server is enabled"
+          },
+          "transport": {
+            "oneOf": [
+              {
+                "type": "object",
+                "required": ["type", "command"],
+                "properties": {
+                  "type": {
+                    "const": "stdio"
+                  },
+                  "command": {
+                    "type": "string",
+                    "description": "Command to execute"
+                  },
+                  "args": {
+                    "type": "array",
+                    "items": { "type": "string" },
+                    "description": "Command arguments"
+                  },
+                  "env": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string" },
+                    "description": "Environment variables (supports ${VAR} substitution)"
+                  },
+                  "cwd": {
+                    "type": "string",
+                    "description": "Working directory for the command"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": ["type", "url"],
+                "properties": {
+                  "type": {
+                    "const": "http"
+                  },
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "URL of the remote MCP server"
+                  },
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string" },
+                    "description": "HTTP headers (supports ${VAR} substitution)"
+                  }
+                }
+              },
+              {
+                "type": "object",
+                "required": ["type", "url"],
+                "properties": {
+                  "type": {
+                    "const": "sse"
+                  },
+                  "url": {
+                    "type": "string",
+                    "format": "uri",
+                    "description": "URL of the SSE MCP server"
+                  },
+                  "headers": {
+                    "type": "object",
+                    "additionalProperties": { "type": "string" },
+                    "description": "HTTP headers (supports ${VAR} substitution)"
+                  }
+                }
+              }
+            ]
+          },
+          "toolPrefix": {
+            "type": "string",
+            "description": "Prefix to add to tool names from this server",
+            "pattern": "^[a-z0-9_]+$"
+          },
+          "timeout": {
+            "type": "integer",
+            "minimum": 1000,
+            "maximum": 300000,
+            "default": 30000,
+            "description": "Request timeout in milliseconds"
+          },
+          "retries": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 5,
+            "default": 3,
+            "description": "Number of retry attempts"
+          }
+        }
+      }
+    }
+  }
+}
+

@@ -1,0 +1,253 @@
+/**
+ * HTTP Backend - Connects to remote MCP servers via Streamable HTTP
+ *
+ * Features:
+ * - Connection pooling via keep-alive
+ * - Automatic retry with exponential backoff
+ * - Session management
+ * - Streaming response support
+ */
+
+import { BaseBackend } from './base.js';
+import { ServerConfig, MCPRequest, MCPResponse, HttpTransport } from '../types.js';
+import { logger } from '../logger.js';
+
+export class HttpBackend extends BaseBackend {
+  private sessionId: string | null = null;
+  private abortController: AbortController | null = null;
+  private activeRequests = 0;
+  private maxConcurrentRequests = 10;
+
+  constructor(config: ServerConfig) {
+    super(config);
+    if (config.transport.type !== 'http') {
+      throw new Error('HttpBackend requires http transport configuration');
+    }
+  }
+
+  private get transport(): HttpTransport {
+    return this.config.transport as HttpTransport;
+  }
+
+  async connect(): Promise<void> {
+    if (this._status === 'connected' || this._status === 'connecting') {
+      return;
+    }
+
+    this.setStatus('connecting');
+    logger.info(`Connecting to backend ${this.id} via HTTP`, {
+      url: this.transport.url,
+    });
+
+    try {
+      this.abortController = new AbortController();
+
+      // Initialize the connection
+      await this.initialize();
+
+      // Load capabilities
+      await Promise.all([
+        this.loadTools(),
+        this.loadResources(),
+        this.loadPrompts(),
+      ]);
+
+      this.setStatus('connected');
+      logger.info(`Backend ${this.id} connected successfully`);
+    } catch (error) {
+      const err = error instanceof Error ? error : new Error(String(error));
+      this.setError(err);
+      this.cleanup();
+      throw err;
+    }
+  }
+
+  async disconnect(): Promise<void> {
+    if (this._status === 'disconnected') {
+      return;
+    }
+
+    logger.info(`Disconnecting backend ${this.id}`);
+    this.cleanup();
+    this.setStatus('disconnected');
+  }
+
+  private cleanup(): void {
+    if (this.abortController) {
+      this.abortController.abort();
+      this.abortController = null;
+    }
+    this.sessionId = null;
+    this._tools = [];
+    this._resources = [];
+    this._prompts = [];
+    this._capabilities = undefined;
+  }
+
+  async sendRequest(request: MCPRequest): Promise<MCPResponse> {
+    // Wait if at max concurrent requests (simple connection pooling)
+    while (this.activeRequests >= this.maxConcurrentRequests) {
+      await this.sleep(50);
+    }
+
+    this.activeRequests++;
+
+    try {
+      return await this.executeRequest(request);
+    } finally {
+      this.activeRequests--;
+    }
+  }
+
+  private async executeRequest(request: MCPRequest): Promise<MCPResponse> {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      'Accept': 'application/json, text/event-stream',
+      'Connection': 'keep-alive', // Enable connection reuse
+      ...this.transport.headers,
+    };
+
+    if (this.sessionId) {
+      headers['Mcp-Session-Id'] = this.sessionId;
+    }
+
+    let lastError: Error | null = null;
+    const maxRetries = this.config.retries;
+
+    for (let attempt = 0; attempt <= maxRetries; attempt++) {
+      try {
+        const response = await fetch(this.transport.url, {
+          method: 'POST',
+          headers,
+          body: JSON.stringify(request),
+          signal: this.abortController?.signal,
+          keepalive: true,
+        });
+
+        // Store session ID if provided
+        const newSessionId = response.headers.get('Mcp-Session-Id');
+        if (newSessionId) {
+          this.sessionId = newSessionId;
+        }
+
+        if (!response.ok) {
+          throw new Error(`HTTP ${response.status}: ${response.statusText}`);
+        }
+
+        const contentType = response.headers.get('Content-Type') ?? '';
+
+        // Handle SSE response (streaming)
+        if (contentType.includes('text/event-stream')) {
+          return await this.handleStreamingResponse(response, request.id);
+        }
+
+        // Handle JSON response
+        const json = await response.json();
+        return json as MCPResponse;
+      } catch (error) {
+        lastError = error instanceof Error ? error : new Error(String(error));
+
+        if (attempt < maxRetries) {
+          const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
+          logger.warn(`Request to ${this.id} failed, retrying in ${delay}ms`, {
+            attempt: attempt + 1,
+            maxRetries,
+            error: lastError.message,
+          });
+          await this.sleep(delay);
+        }
+      }
+    }
+
+    throw lastError ?? new Error('Request failed');
+  }
+
+  /**
+   * Get current active request count (for monitoring)
+   */
+  getActiveRequestCount(): number {
+    return this.activeRequests;
+  }
+
+  private async handleStreamingResponse(
+    response: Response,
+    requestId: string | number
+  ): Promise<MCPResponse> {
+    const reader = response.body?.getReader();
+    if (!reader) {
+      throw new Error('No response body');
+    }
+
+    const decoder = new TextDecoder();
+    let buffer = '';
+
+    try {
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+
+        buffer += decoder.decode(value, { stream: true });
+        const lines = buffer.split('\n');
+        buffer = lines.pop() ?? '';
+
+        for (const line of lines) {
+          if (line.startsWith('data: ')) {
+            const data = line.slice(6);
+            if (data === '[DONE]') {
+              continue;
+            }
+
+            try {
+              const message = JSON.parse(data);
+              if (message.id === requestId) {
+                return message as MCPResponse;
+              }
+            } catch {
+              // Skip invalid JSON
+            }
+          }
+        }
+      }
+    } finally {
+      reader.releaseLock();
+    }
+
+    throw new Error('No response received from stream');
+  }
+
+  protected async sendNotification(method: string, params: unknown): Promise<void> {
+    const notification = {
+      jsonrpc: '2.0',
+      method,
+      params,
+    };
+
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...this.transport.headers,
+    };
+
+    if (this.sessionId) {
+      headers['Mcp-Session-Id'] = this.sessionId;
+    }
+
+    try {
+      await fetch(this.transport.url, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify(notification),
+        signal: this.abortController?.signal,
+      });
+    } catch (error) {
+      logger.warn(`Failed to send notification to ${this.id}`, {
+        method,
+        error: error instanceof Error ? error.message : String(error),
+      });
+    }
+  }
+
+  private sleep(ms: number): Promise<void> {
+    return new Promise(resolve => setTimeout(resolve, ms));
+  }
+}
+

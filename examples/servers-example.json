@@ -1,0 +1,142 @@
+{
+  "$schema": "../config/servers.schema.json",
+  "servers": [
+    {
+      "id": "filesystem",
+      "name": "Filesystem Server",
+      "description": "Access and manipulate local files",
+      "enabled": true,
+      "transport": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/me/projects"]
+      },
+      "toolPrefix": "fs",
+      "timeout": 30000,
+      "retries": 3
+    },
+    {
+      "id": "github",
+      "name": "GitHub Server",
+      "description": "Interact with GitHub repositories, issues, and PRs",
+      "enabled": true,
+      "transport": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-github"],
+        "env": {
+          "GITHUB_TOKEN": "${GITHUB_TOKEN}"
+        }
+      },
+      "toolPrefix": "gh",
+      "timeout": 60000,
+      "retries": 3
+    },
+    {
+      "id": "postgres",
+      "name": "PostgreSQL Server",
+      "description": "Query PostgreSQL databases",
+      "enabled": false,
+      "transport": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-postgres"],
+        "env": {
+          "POSTGRES_CONNECTION_STRING": "${POSTGRES_URL}"
+        }
+      },
+      "toolPrefix": "pg",
+      "timeout": 30000
+    },
+    {
+      "id": "brave-search",
+      "name": "Brave Search",
+      "description": "Web search using Brave Search API",
+      "enabled": false,
+      "transport": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-brave-search"],
+        "env": {
+          "BRAVE_API_KEY": "${BRAVE_API_KEY}"
+        }
+      },
+      "toolPrefix": "search",
+      "timeout": 30000
+    },
+    {
+      "id": "memory",
+      "name": "Memory Server",
+      "description": "Persistent memory for conversations",
+      "enabled": true,
+      "transport": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-memory"]
+      },
+      "toolPrefix": "mem",
+      "timeout": 10000
+    },
+    {
+      "id": "puppeteer",
+      "name": "Puppeteer Server",
+      "description": "Browser automation and web scraping",
+      "enabled": false,
+      "transport": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-puppeteer"]
+      },
+      "toolPrefix": "browser",
+      "timeout": 120000
+    },
+    {
+      "id": "slack",
+      "name": "Slack Server",
+      "description": "Interact with Slack workspaces",
+      "enabled": false,
+      "transport": {
+        "type": "stdio",
+        "command": "npx",
+        "args": ["-y", "@modelcontextprotocol/server-slack"],
+        "env": {
+          "SLACK_BOT_TOKEN": "${SLACK_BOT_TOKEN}",
+          "SLACK_TEAM_ID": "${SLACK_TEAM_ID}"
+        }
+      },
+      "toolPrefix": "slack",
+      "timeout": 30000
+    },
+    {
+      "id": "remote-mcp-server",
+      "name": "Remote MCP Server",
+      "description": "Connect to another MCP server over HTTP",
+      "enabled": false,
+      "transport": {
+        "type": "http",
+        "url": "https://remote-mcp.example.com/mcp",
+        "headers": {
+          "Authorization": "Bearer ${REMOTE_MCP_API_KEY}"
+        }
+      },
+      "toolPrefix": "remote",
+      "timeout": 60000,
+      "retries": 3
+    },
+    {
+      "id": "custom-server",
+      "name": "Custom MCP Server",
+      "description": "Your own custom MCP server",
+      "enabled": false,
+      "transport": {
+        "type": "stdio",
+        "command": "node",
+        "args": ["/path/to/your/custom-mcp-server/index.js"],
+        "cwd": "/path/to/your/custom-mcp-server"
+      },
+      "toolPrefix": "custom",
+      "timeout": 30000
+    }
+  ]
+}
+

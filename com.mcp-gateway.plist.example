@@ -1,0 +1,48 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>Label</key>
+    <string>com.mcp-gateway</string>
+    
+    <key>ProgramArguments</key>
+    <array>
+        <!-- Update this path to your Node.js installation -->
+        <string>/usr/local/bin/node</string>
+        <!-- Update this path to your MCP Gateway installation -->
+        <string>/path/to/mcp-gateway/dist/index.js</string>
+    </array>
+    
+    <key>WorkingDirectory</key>
+    <!-- Update this path to your MCP Gateway installation -->
+    <string>/path/to/mcp-gateway</string>
+    
+    <key>EnvironmentVariables</key>
+    <dict>
+        <key>PORT</key>
+        <string>3010</string>
+        <key>NODE_ENV</key>
+        <string>production</string>
+        <key>PATH</key>
+        <string>/usr/local/bin:/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin</string>
+    </dict>
+    
+    <key>RunAtLoad</key>
+    <true/>
+    
+    <key>KeepAlive</key>
+    <true/>
+    
+    <key>StandardOutPath</key>
+    <!-- Update this path to your MCP Gateway installation -->
+    <string>/path/to/mcp-gateway/logs/gateway.log</string>
+    
+    <key>StandardErrorPath</key>
+    <!-- Update this path to your MCP Gateway installation -->
+    <string>/path/to/mcp-gateway/logs/gateway-error.log</string>
+    
+    <key>ThrottleInterval</key>
+    <integer>10</integer>
+</dict>
+</plist>
+

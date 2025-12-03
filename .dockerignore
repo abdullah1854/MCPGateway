@@ -1,0 +1,38 @@
+# Dependencies
+node_modules
+
+# Build output
+dist
+
+# Git
+.git
+.gitignore
+
+# IDE
+.vscode
+.idea
+*.swp
+*.swo
+
+# Logs
+*.log
+logs
+
+# Environment files
+.env
+.env.*
+
+# Test files
+*.test.ts
+*.spec.ts
+__tests__
+coverage
+
+# Documentation
+*.md
+!README.md
+
+# Docker files (don't need to copy these into the image)
+docker-compose*.yml
+Dockerfile*
+
