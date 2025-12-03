@@ -625,7 +625,37 @@ function getDashboardHTML(): string {
       margin-left: 0.5rem;
       vertical-align: middle;
     }
-    
+
+    .disconnected-badge {
+      background: var(--warning, #f59e0b);
+      color: white;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.6rem;
+      margin-left: 0.5rem;
+      vertical-align: middle;
+    }
+
+    .no-tools-badge {
+      background: var(--text-secondary);
+      color: white;
+      padding: 0.15rem 0.4rem;
+      border-radius: 4px;
+      font-size: 0.6rem;
+      margin-left: 0.5rem;
+      vertical-align: middle;
+    }
+
+    .backend-card.backend-disconnected {
+      opacity: 0.8;
+      border-color: var(--warning, #f59e0b);
+    }
+
+    .backend-card.backend-no-tools {
+      opacity: 0.7;
+      border-color: var(--text-secondary);
+    }
+
     .backend-disabled-tool {
       opacity: 0.6;
     }
@@ -677,7 +707,17 @@ function getDashboardHTML(): string {
       font-size: 0.8rem;
       color: var(--text-secondary);
     }
-    
+
+    .backend-error {
+      color: var(--error);
+      font-size: 0.75rem;
+      margin-top: 0.25rem;
+      max-width: 400px;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      white-space: nowrap;
+    }
+
     .backend-actions {
       display: flex;
       align-items: center;
@@ -819,7 +859,22 @@ function getDashboardHTML(): string {
       background: var(--accent);
       border-color: var(--accent);
     }
-    
+
+    .pill.disconnected {
+      border-color: var(--warning, #f59e0b);
+      opacity: 0.7;
+    }
+
+    .pill.disabled {
+      border-color: var(--error);
+      opacity: 0.6;
+    }
+
+    .pill.no-tools {
+      border-color: var(--text-secondary);
+      opacity: 0.5;
+    }
+
     .loading {
       text-align: center;
       padding: 3rem;
@@ -1309,12 +1364,24 @@ function getDashboardHTML(): string {
     
     function renderFilters() {
       const container = document.getElementById('backend-filters');
-      container.innerHTML = backends.map(b => \`
-        <span class="pill \${selectedBackend === b.id ? 'active' : ''}" 
-              onclick="filterByBackend('\${b.id}')">
-          \${b.id} <span class="badge">\${getBackendToolCount(b.id)}</span>
-        </span>
-      \`).join('');
+      container.innerHTML = backends.map(b => {
+        const toolCount = getBackendToolCount(b.id);
+        const isDisconnected = b.status === 'disconnected' || b.status === 'error';
+        const isDisabled = !b.enabled;
+        const hasNoTools = toolCount === 0;
+
+        let pillClass = 'pill';
+        if (selectedBackend === b.id) pillClass += ' active';
+        if (isDisabled) pillClass += ' disabled';
+        else if (isDisconnected) pillClass += ' disconnected';
+        else if (hasNoTools) pillClass += ' no-tools';
+
+        return \`
+          <span class="\${pillClass}" onclick="filterByBackend('\${b.id}')">
+            \${b.id} <span class="badge">\${toolCount}</span>
+          </span>
+        \`;
+      }).join('');
     }
     
     function getBackendToolCount(backendId) {
@@ -1354,26 +1421,49 @@ function getDashboardHTML(): string {
     
     function renderBackends() {
       const container = document.getElementById('backends-container');
-      
-      const filteredBackends = selectedBackend 
+
+      const filteredBackends = selectedBackend
         ? backends.filter(b => b.id === selectedBackend)
         : backends;
-      
+
       container.innerHTML = filteredBackends.map(backend => {
         const backendTools = getToolsForBackend(backend.id);
         const enabledCount = backendTools.filter(t => t.enabled && !t.backendDisabled).length;
         const isExpanded = expandedBackends.has(backend.id);
         const isBackendDisabled = !backend.enabled;
-        
+        const isDisconnected = backend.status === 'disconnected' || backend.status === 'error';
+        const hasNoTools = backendTools.length === 0;
+
+        // Determine card classes
+        let cardClasses = 'backend-card';
+        if (isExpanded) cardClasses += ' expanded';
+        if (isBackendDisabled) cardClasses += ' backend-disabled';
+        else if (isDisconnected) cardClasses += ' backend-disconnected';
+        else if (hasNoTools) cardClasses += ' backend-no-tools';
+
+        // Determine badge to show
+        let badge = '';
+        if (isBackendDisabled) {
+          badge = '<span class="disabled-badge">DISABLED</span>';
+        } else if (isDisconnected) {
+          badge = '<span class="disconnected-badge">DISCONNECTED</span>';
+        } else if (hasNoTools) {
+          badge = '<span class="no-tools-badge">NO TOOLS</span>';
+        }
+
+        // Error message for disconnected servers
+        const errorMessage = backend.error ? escapeHtml(backend.error) : '';
+
         return \`
-          <div class="backend-card \${isExpanded ? 'expanded' : ''} \${isBackendDisabled ? 'backend-disabled' : ''}" id="backend-\${backend.id}">
+          <div class="\${cardClasses}" id="backend-\${backend.id}">
             <div class="backend-header" onclick="toggleExpand('\${backend.id}')">
               <div class="backend-info">
-                <div class="backend-status \${backend.status}"></div>
+                <div class="backend-status \${backend.status}" \${errorMessage ? \`title="\${errorMessage}"\` : ''}></div>
                 <div>
-                  <div class="backend-name">\${backend.id} \${isBackendDisabled ? '<span class="disabled-badge">DISABLED</span>' : ''}</div>
+                  <div class="backend-name">\${backend.id} \${badge}</div>
                   <div class="backend-meta">
                     \${enabledCount}/\${backendTools.length} tools enabled • \${backend.status}
+                    \${errorMessage ? \`<div class="backend-error">⚠️ \${errorMessage}</div>\` : ''}
                   </div>
                 </div>
               </div>
