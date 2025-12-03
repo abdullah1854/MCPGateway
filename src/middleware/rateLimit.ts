@@ -1,6 +1,6 @@
 /**
  * Rate Limiting Middleware
- * Simple in-memory rate limiter
+ * In-memory rate limiter with LRU eviction to prevent unbounded memory growth
  */
 
 import { Request, Response, NextFunction } from 'express';
@@ -12,15 +12,65 @@ interface RateLimitEntry {
   resetAt: number;
 }
 
-const store = new Map<string, RateLimitEntry>();
+// Maximum number of entries to prevent unbounded memory growth
+const MAX_ENTRIES = 10000;
+
+// LRU-style store with bounded size
+class BoundedRateLimitStore {
+  private store = new Map<string, RateLimitEntry>();
+
+  get(key: string): RateLimitEntry | undefined {
+    const entry = this.store.get(key);
+    if (entry) {
+      // Move to end for LRU behavior (delete and re-add)
+      this.store.delete(key);
+      this.store.set(key, entry);
+    }
+    return entry;
+  }
+
+  set(key: string, entry: RateLimitEntry): void {
+    // If key exists, delete it first to update position
+    if (this.store.has(key)) {
+      this.store.delete(key);
+    } else if (this.store.size >= MAX_ENTRIES) {
+      // Evict oldest entry (first in Map)
+      const oldestKey = this.store.keys().next().value;
+      if (oldestKey !== undefined) {
+        this.store.delete(oldestKey);
+      }
+    }
+    this.store.set(key, entry);
+  }
+
+  delete(key: string): void {
+    this.store.delete(key);
+  }
+
+  entries(): IterableIterator<[string, RateLimitEntry]> {
+    return this.store.entries();
+  }
+
+  get size(): number {
+    return this.store.size;
+  }
+}
+
+const store = new BoundedRateLimitStore();
 
 // Clean up expired entries periodically
 setInterval(() => {
   const now = Date.now();
-  for (const [key, entry] of store) {
+  const toDelete: string[] = [];
+
+  for (const [key, entry] of store.entries()) {
     if (now >= entry.resetAt) {
-      store.delete(key);
+      toDelete.push(key);
     }
+  }
+
+  for (const key of toDelete) {
+    store.delete(key);
   }
 }, 60000); // Clean up every minute
 

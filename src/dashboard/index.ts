@@ -6,6 +6,7 @@ import { Router, Request, Response } from 'express';
 import { BackendManager } from '../backend/index.js';
 import ConfigManager from '../config.js';
 import { ServerConfigSchema, ServerConfig } from '../types.js';
+import { logger } from '../logger.js';
 
 // Helper to find which backend a tool belongs to based on prefix
 function findBackendIdForTool(toolName: string, backendManager: BackendManager): string | null {
@@ -159,12 +160,34 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
   });
 
   // API: Restart server
-  router.post('/api/restart', (_req: Request, res: Response) => {
+  // Requires confirmation token to prevent accidental restarts
+  router.post('/api/restart', (req: Request, res: Response) => {
+    const { confirm } = req.body;
+
+    // Require explicit confirmation
+    if (confirm !== 'restart-confirmed') {
+      res.status(400).json({
+        success: false,
+        error: 'Restart requires confirmation',
+        message: 'Send { "confirm": "restart-confirmed" } to confirm the restart',
+      });
+      return;
+    }
+
+    logger.warn('Server restart requested via dashboard API');
+
     res.json({ success: true, message: 'Server restarting...' });
 
-    // Give time for the response to be sent, then exit
+    // Give time for the response to be sent, then exit gracefully
     // The process manager (pm2, systemd, etc.) or npm script should restart it
-    setTimeout(() => {
+    setTimeout(async () => {
+      // Attempt graceful shutdown
+      logger.info('Initiating graceful restart...');
+      try {
+        await backendManager.disconnectAll();
+      } catch (error) {
+        logger.error('Error during graceful shutdown', { error });
+      }
       process.exit(0);
     }, 500);
   });
@@ -1723,7 +1746,11 @@ function getDashboardHTML(): string {
 
       try {
         showToast('Restarting server...');
-        await fetch('/dashboard/api/restart', { method: 'POST' });
+        await fetch('/dashboard/api/restart', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ confirm: 'restart-confirmed' })
+        });
 
         // Wait a moment then start polling for the server to come back
         setTimeout(() => {

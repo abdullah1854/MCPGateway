@@ -122,8 +122,8 @@ export class MCPProtocolHandler {
       case 'prompts/get':
         return this.handlePromptsGet(request, session);
 
-      case 'completion/complete':
-        return this.handleCompletion(request, session);
+      // Note: completion/complete is not supported by the gateway
+      // Clients should check capabilities before calling
 
       default:
         return {
@@ -358,27 +358,6 @@ export class MCPProtocolHandler {
       id: request.id,
       result: response.result,
       error: response.error,
-    };
-  }
-
-  /**
-   * Handle completion/complete request
-   */
-  private handleCompletion(request: MCPRequest, session: GatewaySession): MCPResponse {
-    if (!session.initialized) {
-      logger.debug('completion/complete called before initialized notification');
-    }
-
-    // Gateway doesn't support completion - return empty
-    return {
-      jsonrpc: '2.0',
-      id: request.id,
-      result: {
-        completion: {
-          values: [],
-          hasMore: false,
-        },
-      },
     };
   }
 

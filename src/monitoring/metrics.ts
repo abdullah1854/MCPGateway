@@ -302,8 +302,18 @@ export function createMetricsRoutes(
     res.json(metricsCollector.getSummary());
   });
 
-  // Reset metrics (for testing)
-  router.post('/metrics/reset', (_req: Request, res: Response) => {
+  // Reset metrics (requires confirmation - for testing/admin use only)
+  router.post('/metrics/reset', (req: Request, res: Response) => {
+    const { confirm } = req.body;
+
+    if (confirm !== 'reset-confirmed') {
+      res.status(400).json({
+        success: false,
+        error: 'Metrics reset requires confirmation. Send { "confirm": "reset-confirmed" }',
+      });
+      return;
+    }
+
     metricsCollector.reset();
     res.json({ success: true, message: 'Metrics reset' });
   });

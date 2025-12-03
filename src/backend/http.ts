@@ -17,6 +17,10 @@ export class HttpBackend extends BaseBackend {
   private abortController: AbortController | null = null;
   private activeRequests = 0;
   private maxConcurrentRequests = 10;
+  private requestQueue: Array<{
+    resolve: () => void;
+    reject: (error: Error) => void;
+  }> = [];
 
   constructor(config: ServerConfig) {
     super(config);
@@ -83,19 +87,50 @@ export class HttpBackend extends BaseBackend {
     this._resources = [];
     this._prompts = [];
     this._capabilities = undefined;
+
+    // Reject all queued requests
+    const queuedRequests = this.requestQueue.splice(0);
+    for (const req of queuedRequests) {
+      req.reject(new Error('Backend disconnected'));
+    }
+    this.activeRequests = 0;
   }
 
   async sendRequest(request: MCPRequest): Promise<MCPResponse> {
-    // Wait if at max concurrent requests (simple connection pooling)
-    while (this.activeRequests >= this.maxConcurrentRequests) {
-      await this.sleep(50);
-    }
-
-    this.activeRequests++;
+    // Wait for a slot using promise-based queue (no busy-wait)
+    await this.acquireSlot();
 
     try {
       return await this.executeRequest(request);
     } finally {
+      this.releaseSlot();
+    }
+  }
+
+  /**
+   * Acquire a slot for making a request (promise-based, no busy-wait)
+   */
+  private async acquireSlot(): Promise<void> {
+    if (this.activeRequests < this.maxConcurrentRequests) {
+      this.activeRequests++;
+      return;
+    }
+
+    // Wait in queue for a slot to become available
+    return new Promise((resolve, reject) => {
+      this.requestQueue.push({ resolve, reject });
+    });
+  }
+
+  /**
+   * Release a slot and wake up next waiting request if any
+   */
+  private releaseSlot(): void {
+    const next = this.requestQueue.shift();
+    if (next) {
+      // Don't decrement - the slot is being transferred to the next request
+      next.resolve();
+    } else {
       this.activeRequests--;
     }
   }

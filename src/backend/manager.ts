@@ -361,11 +361,8 @@ export class BackendManager extends EventEmitter {
       };
     }
 
-    // Remove prefix if present
-    let originalToolName = toolName;
-    if (backend.config.toolPrefix && toolName.startsWith(`${backend.config.toolPrefix}_`)) {
-      originalToolName = toolName.slice(backend.config.toolPrefix.length + 1);
-    }
+    // Use centralized prefix handling from backend
+    const originalToolName = backend.unprefixToolName(toolName);
 
     const request: MCPRequest = {
       jsonrpc: '2.0',
@@ -515,30 +512,52 @@ export class BackendManager extends EventEmitter {
   /**
    * Execute multiple tool calls with concurrency limit
    * Useful for rate-limited backends or resource-constrained environments
+   *
+   * Uses a proper semaphore pattern to ensure exact concurrency limit
    */
   async callToolsConcurrent(
     calls: Array<{ toolName: string; args: unknown }>,
     concurrency: number = 5
   ): Promise<MCPResponse[]> {
     const results: MCPResponse[] = new Array(calls.length);
-    let currentIndex = 0;
 
-    // Worker function that processes calls from the queue
-    const worker = async (): Promise<void> => {
-      while (currentIndex < calls.length) {
-        const index = currentIndex++;
-        const call = calls[index];
-        results[index] = await this.callTool(call.toolName, call.args);
+    // Semaphore implementation for proper concurrency control
+    let activeCount = 0;
+    const waitQueue: Array<() => void> = [];
+
+    const acquire = (): Promise<void> => {
+      return new Promise((resolve) => {
+        if (activeCount < concurrency) {
+          activeCount++;
+          resolve();
+        } else {
+          waitQueue.push(resolve);
+        }
+      });
+    };
+
+    const release = (): void => {
+      const next = waitQueue.shift();
+      if (next) {
+        // Transfer slot to next waiter (don't decrement activeCount)
+        next();
+      } else {
+        activeCount--;
       }
     };
 
-    // Start `concurrency` number of workers
-    const workers = Array.from(
-      { length: Math.min(concurrency, calls.length) },
-      () => worker()
-    );
+    // Process a single call with semaphore control
+    const processCall = async (index: number): Promise<void> => {
+      await acquire();
+      try {
+        results[index] = await this.callTool(calls[index].toolName, calls[index].args);
+      } finally {
+        release();
+      }
+    };
 
-    await Promise.all(workers);
+    // Start all calls - semaphore will control actual concurrency
+    await Promise.all(calls.map((_, index) => processCall(index)));
     return results;
   }
 

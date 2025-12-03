@@ -38,6 +38,11 @@ export interface Backend extends EventEmitter {
   connect(): Promise<void>;
   disconnect(): Promise<void>;
   sendRequest(request: MCPRequest): Promise<MCPResponse>;
+
+  /**
+   * Remove tool prefix to get original name for backend call
+   */
+  unprefixToolName(name: string): string;
   
   on<K extends keyof BackendEvents>(
     event: K,
@@ -128,9 +133,9 @@ export abstract class BaseBackend extends EventEmitter implements Backend {
   }
 
   /**
-   * Remove tool prefix to get original name
+   * Remove tool prefix to get original name for backend call
    */
-  protected unprefixToolName(name: string): string {
+  unprefixToolName(name: string): string {
     if (this.config.toolPrefix && name.startsWith(`${this.config.toolPrefix}_`)) {
       return name.slice(this.config.toolPrefix.length + 1);
     }

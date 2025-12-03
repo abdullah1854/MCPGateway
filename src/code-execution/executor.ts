@@ -11,12 +11,69 @@
  * - Creating safe wrapper objects instead of exposing native constructors
  * - Freezing all exposed objects to prevent prototype pollution
  * - Blocking access to Function, eval, and other dangerous globals
+ * - Recursively freezing all objects to prevent prototype chain escapes
+ * - Using primitive wrappers that cannot leak constructors
  */
 
 import { BackendManager } from '../backend/index.js';
 import { MCPResponse } from '../types.js';
 import { logger } from '../logger.js';
 import * as vm from 'vm';
+
+/**
+ * Deep freeze an object and all nested objects to prevent prototype access
+ */
+function deepFreeze<T extends object>(obj: T, seen = new WeakSet()): T {
+  if (obj === null || typeof obj !== 'object') {
+    return obj;
+  }
+
+  if (seen.has(obj)) {
+    return obj;
+  }
+  seen.add(obj);
+
+  // Freeze the object itself
+  Object.freeze(obj);
+
+  // Recursively freeze all properties
+  for (const key of Object.getOwnPropertyNames(obj)) {
+    const value = (obj as Record<string, unknown>)[key];
+    if (value !== null && typeof value === 'object') {
+      deepFreeze(value as object, seen);
+    }
+  }
+
+  return obj;
+}
+
+/**
+ * Create a safe primitive wrapper that cannot leak its constructor
+ * This wraps values so that .constructor access returns undefined
+ */
+function createSafeWrapper<T>(fn: T): T {
+  if (typeof fn !== 'function') {
+    return fn;
+  }
+
+  // Create a new function that wraps the original
+  const wrapper = function (this: unknown, ...args: unknown[]) {
+    return (fn as (...args: unknown[]) => unknown).apply(this, args);
+  };
+
+  // Override constructor to prevent escape
+  Object.defineProperty(wrapper, 'constructor', {
+    value: undefined,
+    writable: false,
+    configurable: false,
+    enumerable: false,
+  });
+
+  // Freeze the wrapper
+  Object.freeze(wrapper);
+
+  return wrapper as T;
+}
 
 export interface ExecutionOptions {
   /** Maximum execution time in milliseconds */
@@ -93,6 +150,12 @@ export class CodeExecutor {
 
   /**
    * Create a hardened sandbox context that prevents escapes via constructor access
+   *
+   * Security measures:
+   * 1. All functions are wrapped to hide their constructors
+   * 2. All objects are deep-frozen to prevent prototype pollution
+   * 3. Dangerous globals are explicitly set to undefined
+   * 4. Return values from tool calls are sanitized
    */
   private createHardenedSandbox(
     consoleCapture: Record<string, (...args: unknown[]) => void>,
@@ -100,47 +163,57 @@ export class CodeExecutor {
     context: Record<string, unknown>
   ): Record<string, unknown> {
     // Create safe versions of built-ins that don't expose constructors
-    // We create plain objects with only the methods we want to expose
+    // All functions are wrapped using createSafeWrapper to prevent .constructor escapes
 
-    const safeJSON = Object.freeze({
-      parse: (text: string) => JSON.parse(text),
-      stringify: (value: unknown, replacer?: unknown, space?: unknown) =>
-        JSON.stringify(value, replacer as Parameters<typeof JSON.stringify>[1], space as number),
+    const safeJSON = deepFreeze({
+      parse: createSafeWrapper((text: string) => JSON.parse(text)),
+      stringify: createSafeWrapper((value: unknown, replacer?: unknown, space?: unknown) =>
+        JSON.stringify(value, replacer as Parameters<typeof JSON.stringify>[1], space as number)),
     });
 
-    const safeMath = Object.freeze({ ...Math });
+    // Create safe Math with all functions wrapped
+    const safeMath: Record<string, unknown> = {};
+    for (const key of Object.getOwnPropertyNames(Math)) {
+      const value = (Math as unknown as Record<string, unknown>)[key];
+      if (typeof value === 'function') {
+        safeMath[key] = createSafeWrapper(value as (...args: unknown[]) => unknown);
+      } else {
+        safeMath[key] = value;
+      }
+    }
+    deepFreeze(safeMath);
 
     // Safe Array - expose static methods only, not the constructor
-    const safeArray = Object.freeze({
-      isArray: (arg: unknown) => Array.isArray(arg),
-      from: <T>(iterable: Iterable<T>) => Array.from(iterable),
-      of: <T>(...items: T[]) => Array.of(...items),
+    const safeArray = deepFreeze({
+      isArray: createSafeWrapper((arg: unknown) => Array.isArray(arg)),
+      from: createSafeWrapper(<T>(iterable: Iterable<T>) => Array.from(iterable)),
+      of: createSafeWrapper(<T>(...items: T[]) => Array.of(...items)),
     });
 
     // Safe Object - expose static methods only
-    const safeObject = Object.freeze({
-      keys: (obj: object) => Object.keys(obj),
-      values: (obj: object) => Object.values(obj),
-      entries: (obj: object) => Object.entries(obj),
-      assign: <T extends object>(target: T, ...sources: object[]) => Object.assign(target, ...sources),
-      freeze: <T extends object>(obj: T) => Object.freeze(obj),
-      fromEntries: (entries: Iterable<readonly [PropertyKey, unknown]>) => Object.fromEntries(entries),
+    const safeObject = deepFreeze({
+      keys: createSafeWrapper((obj: object) => Object.keys(obj)),
+      values: createSafeWrapper((obj: object) => Object.values(obj)),
+      entries: createSafeWrapper((obj: object) => Object.entries(obj)),
+      assign: createSafeWrapper(<T extends object>(target: T, ...sources: object[]) => Object.assign(target, ...sources)),
+      freeze: createSafeWrapper(<T extends object>(obj: T) => Object.freeze(obj)),
+      fromEntries: createSafeWrapper((entries: Iterable<readonly [PropertyKey, unknown]>) => Object.fromEntries(entries)),
     });
 
     // Safe String - static methods only
-    const safeString = Object.freeze({
-      fromCharCode: (...codes: number[]) => String.fromCharCode(...codes),
-      fromCodePoint: (...codePoints: number[]) => String.fromCodePoint(...codePoints),
+    const safeString = deepFreeze({
+      fromCharCode: createSafeWrapper((...codes: number[]) => String.fromCharCode(...codes)),
+      fromCodePoint: createSafeWrapper((...codePoints: number[]) => String.fromCodePoint(...codePoints)),
     });
 
     // Safe Number - static methods and constants only
-    const safeNumber = Object.freeze({
-      isNaN: (value: unknown) => Number.isNaN(value),
-      isFinite: (value: unknown) => Number.isFinite(value),
-      isInteger: (value: unknown) => Number.isInteger(value),
-      isSafeInteger: (value: unknown) => Number.isSafeInteger(value),
-      parseFloat: (string: string) => Number.parseFloat(string),
-      parseInt: (string: string, radix?: number) => Number.parseInt(string, radix),
+    const safeNumber = deepFreeze({
+      isNaN: createSafeWrapper((value: unknown) => Number.isNaN(value)),
+      isFinite: createSafeWrapper((value: unknown) => Number.isFinite(value)),
+      isInteger: createSafeWrapper((value: unknown) => Number.isInteger(value)),
+      isSafeInteger: createSafeWrapper((value: unknown) => Number.isSafeInteger(value)),
+      parseFloat: createSafeWrapper((string: string) => Number.parseFloat(string)),
+      parseInt: createSafeWrapper((string: string, radix?: number) => Number.parseInt(string, radix)),
       MAX_VALUE: Number.MAX_VALUE,
       MIN_VALUE: Number.MIN_VALUE,
       MAX_SAFE_INTEGER: Number.MAX_SAFE_INTEGER,
@@ -151,35 +224,53 @@ export class CodeExecutor {
     });
 
     // Safe Date - only allow creating new dates, not accessing constructor
-    const safeDate = Object.freeze({
-      now: () => Date.now(),
-      parse: (dateString: string) => Date.parse(dateString),
-      UTC: (...args: number[]) => Date.UTC(...(args as Parameters<typeof Date.UTC>)),
+    const safeDate = deepFreeze({
+      now: createSafeWrapper(() => Date.now()),
+      parse: createSafeWrapper((dateString: string) => Date.parse(dateString)),
+      UTC: createSafeWrapper((...args: number[]) => Date.UTC(...(args as Parameters<typeof Date.UTC>))),
     });
 
     // Wrap tool functions to prevent constructor access
+    // Return values are sanitized to prevent prototype chain access
     const safeToolFunctions: Record<string, (...args: unknown[]) => Promise<ToolCallResult>> = {};
     for (const [name, fn] of Object.entries(toolFunctions)) {
-      // Create a wrapper that can't be used to escape
-      safeToolFunctions[name] = Object.freeze(async (...args: unknown[]) => {
-        return fn(...args);
+      // Create a wrapper that can't be used to escape and sanitizes return values
+      const wrapper = async (...args: unknown[]): Promise<ToolCallResult> => {
+        const result = await fn(...args);
+        // Sanitize the result to prevent constructor access on returned objects
+        return JSON.parse(JSON.stringify(result)) as ToolCallResult;
+      };
+      // Override constructor on the wrapper
+      Object.defineProperty(wrapper, 'constructor', {
+        value: undefined,
+        writable: false,
+        configurable: false,
+        enumerable: false,
       });
+      safeToolFunctions[name] = Object.freeze(wrapper);
     }
 
-    // Freeze console to prevent modification
-    const safeConsole = Object.freeze({ ...consoleCapture });
+    // Create safe console with wrapped functions
+    const safeConsole: Record<string, (...args: unknown[]) => void> = {};
+    for (const [name, fn] of Object.entries(consoleCapture)) {
+      safeConsole[name] = createSafeWrapper(fn);
+    }
+    deepFreeze(safeConsole);
 
     // Sanitize user context - remove any functions that could be exploited
     const safeContext: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(context)) {
       if (typeof value === 'function') {
         // Wrap functions to prevent constructor access
-        safeContext[key] = Object.freeze((...args: unknown[]) => {
-          return (value as (...args: unknown[]) => unknown)(...args);
-        });
+        safeContext[key] = createSafeWrapper(value as (...args: unknown[]) => unknown);
       } else if (typeof value === 'object' && value !== null) {
-        // Deep freeze objects
-        safeContext[key] = Object.freeze({ ...value as object });
+        // Deep freeze and sanitize objects via JSON round-trip
+        try {
+          safeContext[key] = deepFreeze(JSON.parse(JSON.stringify(value)));
+        } catch {
+          // If not serializable, skip it
+          safeContext[key] = undefined;
+        }
       } else {
         safeContext[key] = value;
       }
@@ -197,19 +288,19 @@ export class CodeExecutor {
       Date: safeDate,
       Math: safeMath,
 
-      // Primitives that are safe
+      // Primitives that are safe - wrapped versions
       undefined: undefined,
       null: null,
       NaN: NaN,
       Infinity: Infinity,
-      isNaN: (value: unknown) => isNaN(value as number),
-      isFinite: (value: unknown) => isFinite(value as number),
-      parseFloat: (string: string) => parseFloat(string),
-      parseInt: (string: string, radix?: number) => parseInt(string, radix),
-      encodeURI: (uri: string) => encodeURI(uri),
-      decodeURI: (uri: string) => decodeURI(uri),
-      encodeURIComponent: (component: string) => encodeURIComponent(component),
-      decodeURIComponent: (component: string) => decodeURIComponent(component),
+      isNaN: createSafeWrapper((value: unknown) => isNaN(value as number)),
+      isFinite: createSafeWrapper((value: unknown) => isFinite(value as number)),
+      parseFloat: createSafeWrapper((string: string) => parseFloat(string)),
+      parseInt: createSafeWrapper((string: string, radix?: number) => parseInt(string, radix)),
+      encodeURI: createSafeWrapper((uri: string) => encodeURI(uri)),
+      decodeURI: createSafeWrapper((uri: string) => decodeURI(uri)),
+      encodeURIComponent: createSafeWrapper((component: string) => encodeURIComponent(component)),
+      decodeURIComponent: createSafeWrapper((component: string) => decodeURIComponent(component)),
 
       // Explicitly block dangerous globals
       Function: undefined,
@@ -232,6 +323,12 @@ export class CodeExecutor {
       Proxy: undefined,
       Reflect: undefined,
       WebAssembly: undefined,
+      // Also block Symbol which can be used for some escapes
+      Symbol: undefined,
+      // Block AsyncFunction and GeneratorFunction
+      AsyncFunction: undefined,
+      GeneratorFunction: undefined,
+      AsyncGeneratorFunction: undefined,
 
       // Tool functions (wrapped and frozen)
       ...safeToolFunctions,
@@ -240,7 +337,8 @@ export class CodeExecutor {
       ...safeContext,
     };
 
-    return sandbox;
+    // Deep freeze the entire sandbox
+    return deepFreeze(sandbox);
   }
 
   /**

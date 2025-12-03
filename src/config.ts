@@ -127,20 +127,65 @@ export function getEnabledServers(config: ServersConfig): ServerConfig[] {
 }
 
 /**
- * Watch servers config for changes
+ * Watch servers config for changes with debounce and validation
  */
 export function watchServersConfig(
   configPath: string,
-  onChange: (config: ServersConfig) => void
+  onChange: (config: ServersConfig) => void,
+  debounceMs: number = 500
 ): void {
+  let debounceTimer: NodeJS.Timeout | null = null;
+  let lastContent: string | null = null;
+
   watchFile(configPath, { interval: 1000 }, () => {
-    logger.info('Servers config changed, reloading...');
-    try {
-      const config = loadServersConfig(configPath);
-      onChange(config);
-    } catch (error) {
-      logger.error('Failed to reload servers config', { error });
+    // Debounce rapid file changes (editors often write multiple times)
+    if (debounceTimer) {
+      clearTimeout(debounceTimer);
     }
+
+    debounceTimer = setTimeout(() => {
+      debounceTimer = null;
+
+      try {
+        // Read content first to check if it actually changed
+        const content = readFileSync(configPath, 'utf-8');
+
+        // Skip if content hasn't changed (avoids duplicate reloads)
+        if (content === lastContent) {
+          logger.debug('Config file touched but content unchanged, skipping reload');
+          return;
+        }
+
+        lastContent = content;
+        logger.info('Servers config changed, reloading...');
+
+        // Parse and validate before calling onChange
+        const parsed = JSON.parse(content);
+        const config = ServersConfigSchema.parse(parsed);
+
+        // Substitute environment variables
+        const servers = config.servers.map(server => ({
+          ...server,
+          transport: substituteEnvVarsDeep(server.transport),
+        }));
+
+        onChange({ servers });
+      } catch (error) {
+        if (error instanceof SyntaxError) {
+          logger.error('Config reload failed: Invalid JSON syntax', {
+            error: error.message,
+          });
+        } else if (error && typeof error === 'object' && 'issues' in error) {
+          // Zod validation error
+          logger.error('Config reload failed: Validation error', {
+            issues: (error as { issues: unknown[] }).issues,
+          });
+        } else {
+          logger.error('Failed to reload servers config', { error });
+        }
+        // Don't call onChange with invalid config
+      }
+    }, debounceMs);
   });
 }
 

@@ -17,6 +17,12 @@ export class StdioBackend extends BaseBackend {
     timeout: NodeJS.Timeout;
   }>();
 
+  // Stderr throttling to prevent log spam
+  private stderrCount = 0;
+  private stderrThrottleResetTime = 0;
+  private readonly STDERR_THROTTLE_LIMIT = 10; // Max logs per window
+  private readonly STDERR_THROTTLE_WINDOW = 5000; // 5 seconds
+
   constructor(config: ServerConfig) {
     super(config);
     if (config.transport.type !== 'stdio') {
@@ -62,9 +68,9 @@ export class StdioBackend extends BaseBackend {
         this.handleMessage(line);
       });
 
-      // Handle stderr
+      // Handle stderr with throttling to prevent log spam
       this.process.stderr?.on('data', (data) => {
-        logger.warn(`Backend ${this.id} stderr: ${data.toString().trim()}`);
+        this.logStderrThrottled(data.toString().trim());
       });
 
       // Handle process exit
@@ -107,11 +113,11 @@ export class StdioBackend extends BaseBackend {
     }
 
     logger.info(`Disconnecting backend ${this.id}`);
-    this.cleanup();
+    await this.cleanup();
     this.setStatus('disconnected');
   }
 
-  private cleanup(): void {
+  private async cleanup(): Promise<void> {
     // Reject all pending requests
     for (const [_id, pending] of this.pendingRequests) {
       clearTimeout(pending.timeout);
@@ -125,10 +131,29 @@ export class StdioBackend extends BaseBackend {
       this.readline = null;
     }
 
-    // Kill process
+    // Graceful process shutdown: SIGTERM first, then SIGKILL after timeout
     if (this.process) {
-      this.process.kill();
+      const proc = this.process;
       this.process = null;
+
+      // Check if process is still running
+      if (proc.exitCode === null && proc.signalCode === null) {
+        await new Promise<void>((resolve) => {
+          const forceKillTimeout = setTimeout(() => {
+            logger.warn(`Backend ${this.id} did not exit gracefully, sending SIGKILL`);
+            proc.kill('SIGKILL');
+            resolve();
+          }, 5000); // Wait 5 seconds for graceful exit
+
+          proc.once('exit', () => {
+            clearTimeout(forceKillTimeout);
+            resolve();
+          });
+
+          // Send SIGTERM for graceful shutdown
+          proc.kill('SIGTERM');
+        });
+      }
     }
 
     this._tools = [];
@@ -202,6 +227,28 @@ export class StdioBackend extends BaseBackend {
         error: error instanceof Error ? error.message : String(error),
       });
     }
+  }
+
+  /**
+   * Log stderr with throttling to prevent log spam from noisy backends
+   */
+  private logStderrThrottled(message: string): void {
+    const now = Date.now();
+
+    // Reset counter if window has passed
+    if (now >= this.stderrThrottleResetTime) {
+      this.stderrCount = 0;
+      this.stderrThrottleResetTime = now + this.STDERR_THROTTLE_WINDOW;
+    }
+
+    this.stderrCount++;
+
+    if (this.stderrCount <= this.STDERR_THROTTLE_LIMIT) {
+      logger.warn(`Backend ${this.id} stderr: ${message}`);
+    } else if (this.stderrCount === this.STDERR_THROTTLE_LIMIT + 1) {
+      logger.warn(`Backend ${this.id} stderr: (throttling further messages for ${this.STDERR_THROTTLE_WINDOW / 1000}s)`);
+    }
+    // Otherwise, silently drop the message
   }
 
   private handleNotification(method: string, params: unknown): void {
