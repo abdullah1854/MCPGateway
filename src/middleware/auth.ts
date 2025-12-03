@@ -61,10 +61,11 @@ export function createAuthMiddleware(config: GatewayConfig) {
     // By default, dashboard, code-execution API, and JSON metrics are NOT
     // accessible without auth unless explicitly opted in via ALLOW_INSECURE=1.
     if (authMode === 'none') {
-      const path = req.path || '';
+      // Use originalUrl to get the full path before router processing
+      const path = req.originalUrl || req.path || '';
       const isSensitiveEndpoint =
         path === '/dashboard' ||
-        path.startsWith('/dashboard/api') ||
+        path.startsWith('/dashboard/') ||
         path.startsWith('/api/code') ||
         path === '/metrics/json';
 

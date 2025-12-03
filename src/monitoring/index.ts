@@ -6,4 +6,5 @@
  */
 
 export { MetricsCollector, createMetricsRoutes } from './metrics.js';
-export { AuditLogger, AuditEvent, AuditEventType } from './audit.js';
+export { AuditLogger } from './audit.js';
+export type { AuditEvent, AuditEventType } from './audit.js';
