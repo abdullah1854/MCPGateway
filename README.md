@@ -7,6 +7,8 @@ A universal Model Context Protocol (MCP) Gateway that aggregates multiple MCP se
 - ✅ **OpenAI Codex**
 - ✅ **VS Code Copilot**
 
+![MCP Gateway Architecture](screenshots/MCPGateway.jpg)
+
 ## Features
 
 ### Core Features
@@ -198,7 +200,7 @@ Or add to your Cursor settings JSON:
 #### Option 1: CLI
 
 ```bash
-codex mcp add my-gateway --url https://your-gateway-host:3000/mcp
+codex mcp add my-gateway --transport http --url https://your-gateway-host:3010/mcp
 ```
 
 #### Option 2: Config File
@@ -207,11 +209,11 @@ Add to `~/.codex/config.toml`:
 
 ```toml
 [mcp_servers.my_gateway]
-url = "https://your-gateway-host:3000/mcp"
+type = "http"
+url = "https://your-gateway-host:3010/mcp"
 
-# If using OAuth authentication
-[features]
-rmcp_client = true
+# With API key authentication
+# headers = { Authorization = "Bearer your-api-key-here" }
 ```
 
 > **Important:** Codex requires **HTTPS** for remote servers and only supports HTTP Streamable (not SSE).

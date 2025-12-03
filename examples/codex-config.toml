@@ -3,22 +3,21 @@
 
 # Basic configuration (no auth)
 [mcp_servers.mcp_gateway]
+type = "http"
 url = "https://your-gateway.example.com/mcp"
 
 # With API key authentication
 # Note: Codex requires HTTPS for remote servers
 [mcp_servers.mcp_gateway_auth]
+type = "http"
 url = "https://your-gateway.example.com/mcp"
 headers = { Authorization = "Bearer your-api-key-here" }
 
-# Enable OAuth support (if using OAuth authentication)
-[features]
-rmcp_client = true
-
 # Example with local development (use ngrok or similar for HTTPS)
 # For local testing, you can use:
-#   ngrok http 3000
+#   ngrok http 3010
 # Then use the ngrok HTTPS URL
 [mcp_servers.mcp_gateway_dev]
+type = "http"
 url = "https://your-ngrok-url.ngrok.io/mcp"
 
