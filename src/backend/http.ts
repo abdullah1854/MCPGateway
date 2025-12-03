@@ -1,11 +1,11 @@
 /**
- * HTTP Backend - Connects to remote MCP servers via Streamable HTTP
+ * HTTP Backend - Connects to remote MCP servers via Streamable HTTP or SSE
  *
  * Features:
  * - Connection pooling via keep-alive
  * - Automatic retry with exponential backoff
  * - Session management
- * - Streaming response support
+ * - Streaming response support (SSE)
  */
 
 import { BaseBackend } from './base.js';
@@ -20,8 +20,9 @@ export class HttpBackend extends BaseBackend {
 
   constructor(config: ServerConfig) {
     super(config);
-    if (config.transport.type !== 'http') {
-      throw new Error('HttpBackend requires http transport configuration');
+    // Accept both 'http' and 'sse' transport types - both use HTTP with SSE streaming
+    if (config.transport.type !== 'http' && config.transport.type !== 'sse') {
+      throw new Error('HttpBackend requires http or sse transport configuration');
     }
   }
 

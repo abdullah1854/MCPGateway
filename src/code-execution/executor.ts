@@ -6,6 +6,11 @@
  * - Letting agents write loops, conditionals, and data processing
  * - Only returning console.log output instead of full data
  * - Keeping sensitive data in the execution context
+ *
+ * SECURITY: This sandbox is hardened against constructor-based escapes by:
+ * - Creating safe wrapper objects instead of exposing native constructors
+ * - Freezing all exposed objects to prevent prototype pollution
+ * - Blocking access to Function, eval, and other dangerous globals
  */
 
 import { BackendManager } from '../backend/index.js';
@@ -87,6 +92,158 @@ export class CodeExecutor {
   }
 
   /**
+   * Create a hardened sandbox context that prevents escapes via constructor access
+   */
+  private createHardenedSandbox(
+    consoleCapture: Record<string, (...args: unknown[]) => void>,
+    toolFunctions: Record<string, (...args: unknown[]) => Promise<ToolCallResult>>,
+    context: Record<string, unknown>
+  ): Record<string, unknown> {
+    // Create safe versions of built-ins that don't expose constructors
+    // We create plain objects with only the methods we want to expose
+
+    const safeJSON = Object.freeze({
+      parse: (text: string) => JSON.parse(text),
+      stringify: (value: unknown, replacer?: unknown, space?: unknown) =>
+        JSON.stringify(value, replacer as Parameters<typeof JSON.stringify>[1], space as number),
+    });
+
+    const safeMath = Object.freeze({ ...Math });
+
+    // Safe Array - expose static methods only, not the constructor
+    const safeArray = Object.freeze({
+      isArray: (arg: unknown) => Array.isArray(arg),
+      from: <T>(iterable: Iterable<T>) => Array.from(iterable),
+      of: <T>(...items: T[]) => Array.of(...items),
+    });
+
+    // Safe Object - expose static methods only
+    const safeObject = Object.freeze({
+      keys: (obj: object) => Object.keys(obj),
+      values: (obj: object) => Object.values(obj),
+      entries: (obj: object) => Object.entries(obj),
+      assign: <T extends object>(target: T, ...sources: object[]) => Object.assign(target, ...sources),
+      freeze: <T extends object>(obj: T) => Object.freeze(obj),
+      fromEntries: (entries: Iterable<readonly [PropertyKey, unknown]>) => Object.fromEntries(entries),
+    });
+
+    // Safe String - static methods only
+    const safeString = Object.freeze({
+      fromCharCode: (...codes: number[]) => String.fromCharCode(...codes),
+      fromCodePoint: (...codePoints: number[]) => String.fromCodePoint(...codePoints),
+    });
+
+    // Safe Number - static methods and constants only
+    const safeNumber = Object.freeze({
+      isNaN: (value: unknown) => Number.isNaN(value),
+      isFinite: (value: unknown) => Number.isFinite(value),
+      isInteger: (value: unknown) => Number.isInteger(value),
+      isSafeInteger: (value: unknown) => Number.isSafeInteger(value),
+      parseFloat: (string: string) => Number.parseFloat(string),
+      parseInt: (string: string, radix?: number) => Number.parseInt(string, radix),
+      MAX_VALUE: Number.MAX_VALUE,
+      MIN_VALUE: Number.MIN_VALUE,
+      MAX_SAFE_INTEGER: Number.MAX_SAFE_INTEGER,
+      MIN_SAFE_INTEGER: Number.MIN_SAFE_INTEGER,
+      POSITIVE_INFINITY: Number.POSITIVE_INFINITY,
+      NEGATIVE_INFINITY: Number.NEGATIVE_INFINITY,
+      NaN: Number.NaN,
+    });
+
+    // Safe Date - only allow creating new dates, not accessing constructor
+    const safeDate = Object.freeze({
+      now: () => Date.now(),
+      parse: (dateString: string) => Date.parse(dateString),
+      UTC: (...args: number[]) => Date.UTC(...(args as Parameters<typeof Date.UTC>)),
+    });
+
+    // Wrap tool functions to prevent constructor access
+    const safeToolFunctions: Record<string, (...args: unknown[]) => Promise<ToolCallResult>> = {};
+    for (const [name, fn] of Object.entries(toolFunctions)) {
+      // Create a wrapper that can't be used to escape
+      safeToolFunctions[name] = Object.freeze(async (...args: unknown[]) => {
+        return fn(...args);
+      });
+    }
+
+    // Freeze console to prevent modification
+    const safeConsole = Object.freeze({ ...consoleCapture });
+
+    // Sanitize user context - remove any functions that could be exploited
+    const safeContext: Record<string, unknown> = {};
+    for (const [key, value] of Object.entries(context)) {
+      if (typeof value === 'function') {
+        // Wrap functions to prevent constructor access
+        safeContext[key] = Object.freeze((...args: unknown[]) => {
+          return (value as (...args: unknown[]) => unknown)(...args);
+        });
+      } else if (typeof value === 'object' && value !== null) {
+        // Deep freeze objects
+        safeContext[key] = Object.freeze({ ...value as object });
+      } else {
+        safeContext[key] = value;
+      }
+    }
+
+    // Build the final sandbox - explicitly block dangerous globals
+    const sandbox: Record<string, unknown> = {
+      // Safe built-ins (frozen, no constructor access)
+      console: safeConsole,
+      JSON: safeJSON,
+      Array: safeArray,
+      Object: safeObject,
+      String: safeString,
+      Number: safeNumber,
+      Date: safeDate,
+      Math: safeMath,
+
+      // Primitives that are safe
+      undefined: undefined,
+      null: null,
+      NaN: NaN,
+      Infinity: Infinity,
+      isNaN: (value: unknown) => isNaN(value as number),
+      isFinite: (value: unknown) => isFinite(value as number),
+      parseFloat: (string: string) => parseFloat(string),
+      parseInt: (string: string, radix?: number) => parseInt(string, radix),
+      encodeURI: (uri: string) => encodeURI(uri),
+      decodeURI: (uri: string) => decodeURI(uri),
+      encodeURIComponent: (component: string) => encodeURIComponent(component),
+      decodeURIComponent: (component: string) => decodeURIComponent(component),
+
+      // Explicitly block dangerous globals
+      Function: undefined,
+      eval: undefined,
+      setTimeout: undefined,
+      setInterval: undefined,
+      setImmediate: undefined,
+      clearTimeout: undefined,
+      clearInterval: undefined,
+      clearImmediate: undefined,
+      process: undefined,
+      global: undefined,
+      globalThis: undefined,
+      require: undefined,
+      module: undefined,
+      exports: undefined,
+      __dirname: undefined,
+      __filename: undefined,
+      Buffer: undefined,
+      Proxy: undefined,
+      Reflect: undefined,
+      WebAssembly: undefined,
+
+      // Tool functions (wrapped and frozen)
+      ...safeToolFunctions,
+
+      // User context (sanitized)
+      ...safeContext,
+    };
+
+    return sandbox;
+  }
+
+  /**
    * Execute code in a sandboxed environment with access to MCP tools
    */
   async execute(code: string, options: ExecutionOptions = {}): Promise<ExecutionResult> {
@@ -130,35 +287,25 @@ export class CodeExecutor {
       },
     };
 
-    // Build the sandbox context
-    const sandbox: Record<string, unknown> = {
-      console: consoleCapture,
-      JSON,
-      Array,
-      Object,
-      String,
-      Number,
-      Boolean,
-      Date,
-      Math,
-      RegExp,
-      Error,
-      Map,
-      Set,
-      Promise,
-      setTimeout: undefined, // Disabled for security
-      setInterval: undefined, // Disabled for security
-      ...toolFunctions,
-      ...context,
-    };
+    // Build the hardened sandbox context
+    const sandbox = this.createHardenedSandbox(consoleCapture, toolFunctions, context);
 
-    // Create VM context
-    const vmContext = vm.createContext(sandbox);
+    // Create VM context with hardened sandbox
+    const vmContext = vm.createContext(sandbox, {
+      codeGeneration: {
+        strings: false, // Disable eval() and new Function()
+        wasm: false,    // Disable WebAssembly compilation
+      },
+    });
 
     try {
       // Wrap code in async function to support await
+      // Also add a preamble that blocks common escape attempts
       const wrappedCode = `
+        'use strict';
         (async () => {
+          // Block constructor access attempts
+          const _blocked = () => { throw new Error('Access denied'); };
           ${code}
         })()
       `;

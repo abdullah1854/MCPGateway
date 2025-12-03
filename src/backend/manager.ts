@@ -299,6 +299,15 @@ export class BackendManager extends EventEmitter {
   }
 
   /**
+   * Load initial disabled state (called on startup)
+   */
+  loadDisabledState(disabledTools: string[], disabledBackends: string[]): void {
+    this.disabledTools = new Set(disabledTools);
+    this.disabledBackends = new Set(disabledBackends);
+    logger.info(`Loaded UI state: ${disabledTools.length} disabled tools, ${disabledBackends.length} disabled backends`);
+  }
+
+  /**
    * Get all aggregated resources from all connected backends
    */
   getAllResources(): MCPResource[] {
@@ -511,30 +520,25 @@ export class BackendManager extends EventEmitter {
     calls: Array<{ toolName: string; args: unknown }>,
     concurrency: number = 5
   ): Promise<MCPResponse[]> {
-    const results: MCPResponse[] = [];
-    const executing: Promise<void>[] = [];
+    const results: MCPResponse[] = new Array(calls.length);
+    let currentIndex = 0;
 
-    for (let i = 0; i < calls.length; i++) {
-      const call = calls[i];
-      const promise = this.callTool(call.toolName, call.args).then(result => {
-        results[i] = result;
-      });
-
-      executing.push(promise);
-
-      if (executing.length >= concurrency) {
-        await Promise.race(executing);
-        // Remove completed promises
-        const completed = executing.filter(
-          p => (p as Promise<void> & { _resolved?: boolean })._resolved
-        );
-        for (const c of completed) {
-          executing.splice(executing.indexOf(c), 1);
-        }
+    // Worker function that processes calls from the queue
+    const worker = async (): Promise<void> => {
+      while (currentIndex < calls.length) {
+        const index = currentIndex++;
+        const call = calls[index];
+        results[index] = await this.callTool(call.toolName, call.args);
       }
-    }
+    };
 
-    await Promise.all(executing);
+    // Start `concurrency` number of workers
+    const workers = Array.from(
+      { length: Math.min(concurrency, calls.length) },
+      () => worker()
+    );
+
+    await Promise.all(workers);
     return results;
   }
 

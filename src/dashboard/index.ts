@@ -30,6 +30,15 @@ function findBackendIdForTool(toolName: string, backendManager: BackendManager):
   return null;
 }
 
+// Helper to persist current UI state
+function persistUIState(backendManager: BackendManager): void {
+  const configManager = ConfigManager.getInstance();
+  configManager.saveUIState({
+    disabledTools: Array.from(backendManager.getDisabledTools()),
+    disabledBackends: Array.from(backendManager.getDisabledBackends()),
+  });
+}
+
 export function createDashboardRoutes(backendManager: BackendManager): Router {
   const router = Router();
 
@@ -82,7 +91,7 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
   router.post('/api/tools/:name/toggle', (req: Request, res: Response) => {
     const { name } = req.params;
     const { enabled } = req.body;
-    
+
     if (enabled) {
       // If enabling a tool, also enable its backend if disabled
       const backendId = findBackendIdForTool(name, backendManager);
@@ -94,6 +103,9 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
       backendManager.disableTool(name);
     }
 
+    // Persist state to file
+    persistUIState(backendManager);
+
     res.json({ success: true, name, enabled });
   });
 
@@ -101,12 +113,15 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
   router.post('/api/backends/:id/toggle', (req: Request, res: Response) => {
     const { id } = req.params;
     const { enabled } = req.body;
-    
+
     if (enabled) {
       backendManager.enableBackend(id);
     } else {
       backendManager.disableBackend(id);
     }
+
+    // Persist state to file
+    persistUIState(backendManager);
 
     res.json({ success: true, id, enabled });
   });
@@ -114,7 +129,7 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
   // API: Bulk enable/disable tools
   router.post('/api/tools/bulk', (req: Request, res: Response) => {
     const { tools, enabled } = req.body as { tools: string[]; enabled: boolean };
-    
+
     for (const name of tools) {
       if (enabled) {
         backendManager.enableTool(name);
@@ -122,6 +137,9 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
         backendManager.disableTool(name);
       }
     }
+
+    // Persist state to file
+    persistUIState(backendManager);
 
     res.json({ success: true, count: tools.length, enabled });
   });

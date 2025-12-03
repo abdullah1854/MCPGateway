@@ -16,6 +16,7 @@ import { createCodeExecutionRoutes } from './code-execution/index.js';
 import { createAuthMiddleware, createRateLimitMiddleware } from './middleware/index.js';
 import { MetricsCollector, createMetricsRoutes, AuditLogger } from './monitoring/index.js';
 import { logger } from './logger.js';
+import ConfigManager from './config.js';
 
 export class MCPGatewayServer {
   private app: Express;
@@ -213,7 +214,7 @@ export class MCPGatewayServer {
    */
   async loadBackends(serversConfig: ServersConfig): Promise<void> {
     const enabledServers = serversConfig.servers.filter(s => s.enabled);
-    
+
     logger.info(`Loading ${enabledServers.length} backend servers`);
 
     for (const serverConfig of enabledServers) {
@@ -225,6 +226,11 @@ export class MCPGatewayServer {
         });
       }
     }
+
+    // Load persisted UI state (disabled tools/backends)
+    const configManager = ConfigManager.getInstance();
+    const uiState = configManager.getUIState();
+    this.backendManager.loadDisabledState(uiState.disabledTools, uiState.disabledBackends);
   }
 
   /**

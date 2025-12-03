@@ -2,7 +2,7 @@
  * Configuration Manager for MCP Gateway
  */
 
-import { readFileSync, writeFileSync, existsSync, watchFile } from 'fs';
+import { readFileSync, writeFileSync, existsSync, watchFile, mkdirSync } from 'fs';
 import { resolve, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import {
@@ -13,6 +13,14 @@ import {
   ServerConfig,
 } from './types.js';
 import { logger } from './logger.js';
+
+/**
+ * UI State - persisted tool/backend enabled/disabled selections
+ */
+export interface UIState {
+  disabledTools: string[];
+  disabledBackends: string[];
+}
 
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
@@ -144,11 +152,15 @@ class ConfigManager {
   private gatewayConfig: GatewayConfig;
   private serversConfig: ServersConfig;
   private serversConfigPath: string;
+  private uiStatePath: string;
+  private uiState: UIState;
 
   private constructor() {
     this.serversConfigPath = resolve(__dirname, '../config/servers.json');
+    this.uiStatePath = resolve(__dirname, '../config/.ui-state.json');
     this.gatewayConfig = loadGatewayConfig();
     this.serversConfig = loadServersConfig(this.serversConfigPath);
+    this.uiState = this.loadUIState();
   }
 
   static getInstance(): ConfigManager {
@@ -255,6 +267,72 @@ class ConfigManager {
       logger.error('Failed to save servers config', { error });
       throw error;
     }
+  }
+
+  /**
+   * Load UI state from file
+   */
+  private loadUIState(): UIState {
+    const defaultState: UIState = { disabledTools: [], disabledBackends: [] };
+
+    if (!existsSync(this.uiStatePath)) {
+      return defaultState;
+    }
+
+    try {
+      const content = readFileSync(this.uiStatePath, 'utf-8');
+      const parsed = JSON.parse(content);
+      return {
+        disabledTools: Array.isArray(parsed.disabledTools) ? parsed.disabledTools : [],
+        disabledBackends: Array.isArray(parsed.disabledBackends) ? parsed.disabledBackends : [],
+      };
+    } catch (error) {
+      logger.warn('Failed to load UI state, using defaults', { error });
+      return defaultState;
+    }
+  }
+
+  /**
+   * Get the current UI state
+   */
+  getUIState(): UIState {
+    return this.uiState;
+  }
+
+  /**
+   * Save UI state to file
+   */
+  saveUIState(state: UIState): void {
+    this.uiState = state;
+    try {
+      // Ensure config directory exists
+      const configDir = dirname(this.uiStatePath);
+      if (!existsSync(configDir)) {
+        mkdirSync(configDir, { recursive: true });
+      }
+
+      const content = JSON.stringify(state, null, 2);
+      writeFileSync(this.uiStatePath, content, 'utf-8');
+      logger.debug('UI state saved successfully');
+    } catch (error) {
+      logger.error('Failed to save UI state', { error });
+    }
+  }
+
+  /**
+   * Update disabled tools list and persist
+   */
+  updateDisabledTools(disabledTools: string[]): void {
+    this.uiState.disabledTools = disabledTools;
+    this.saveUIState(this.uiState);
+  }
+
+  /**
+   * Update disabled backends list and persist
+   */
+  updateDisabledBackends(disabledBackends: string[]): void {
+    this.uiState.disabledBackends = disabledBackends;
+    this.saveUIState(this.uiState);
   }
 }
 
