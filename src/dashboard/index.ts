@@ -1272,6 +1272,14 @@ function getDashboardHTML(): string {
     let searchQuery = '';
     let selectedBackend = null;
     let expandedBackends = new Set();
+
+    // HTML escape function to prevent XSS and HTML parsing issues
+    function escapeHtml(text) {
+      if (!text) return '';
+      const div = document.createElement('div');
+      div.textContent = text;
+      return div.innerHTML;
+    }
     
     async function loadData() {
       try {
@@ -1396,12 +1404,12 @@ function getDashboardHTML(): string {
               \${backendTools.map(tool => \`
                 <div class="tool-item \${tool.backendDisabled ? 'backend-disabled-tool' : ''}">
                   <div>
-                    <div class="tool-name \${(tool.enabled && !tool.backendDisabled) ? '' : 'disabled'}">\${tool.name}</div>
-                    \${tool.description ? \`<div class="tool-desc">\${tool.description}</div>\` : ''}
+                    <div class="tool-name \${(tool.enabled && !tool.backendDisabled) ? '' : 'disabled'}">\${escapeHtml(tool.name)}</div>
+                    \${tool.description ? \`<div class="tool-desc">\${escapeHtml(tool.description)}</div>\` : ''}
                   </div>
                   <label class="toggle">
-                    <input type="checkbox" \${(tool.enabled && !tool.backendDisabled) ? 'checked' : ''} 
-                           onchange="toggleTool('\${tool.name}', this.checked)">
+                    <input type="checkbox" \${(tool.enabled && !tool.backendDisabled) ? 'checked' : ''}
+                           onchange="toggleTool('\${escapeHtml(tool.name)}', this.checked)">
                     <span class="toggle-slider"></span>
                   </label>
                 </div>
