@@ -15,6 +15,7 @@ dist/
 # Config files (contain sensitive server configurations)
 config/servers.json
 config/gateway.json
+config/.ui-state.json
 !config/servers.example.json
 !config/gateway.example.json
 !config/*.schema.json
