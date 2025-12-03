@@ -460,19 +460,34 @@ function getDashboardHTML(): string {
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>MCP Gateway Dashboard</title>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg-primary: #0a0a0f;
-      --bg-secondary: #12121a;
-      --bg-tertiary: #1a1a25;
-      --accent: #6366f1;
-      --accent-hover: #818cf8;
-      --success: #22c55e;
+      --bg-primary: #08080c;
+      --bg-secondary: rgba(16, 16, 24, 0.8);
+      --bg-tertiary: rgba(24, 24, 36, 0.9);
+      --bg-card: rgba(20, 20, 32, 0.6);
+      --bg-glass: rgba(255, 255, 255, 0.02);
+      --accent: #7c3aed;
+      --accent-secondary: #06b6d4;
+      --accent-glow: rgba(124, 58, 237, 0.4);
+      --accent-hover: #8b5cf6;
+      --success: #10b981;
+      --success-glow: rgba(16, 185, 129, 0.3);
       --warning: #f59e0b;
+      --warning-glow: rgba(245, 158, 11, 0.3);
       --error: #ef4444;
-      --text-primary: #f1f5f9;
+      --error-glow: rgba(239, 68, 68, 0.3);
+      --text-primary: #f8fafc;
       --text-secondary: #94a3b8;
-      --border: #2a2a3a;
+      --text-muted: #64748b;
+      --border: rgba(148, 163, 184, 0.1);
+      --border-hover: rgba(148, 163, 184, 0.2);
+      --gradient-1: linear-gradient(135deg, #7c3aed 0%, #06b6d4 100%);
+      --gradient-2: linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%);
+      --gradient-3: linear-gradient(180deg, rgba(124, 58, 237, 0.1) 0%, transparent 100%);
     }
     
     * {
@@ -482,236 +497,327 @@ function getDashboardHTML(): string {
     }
     
     body {
-      font-family: 'SF Pro Display', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
       background: var(--bg-primary);
       color: var(--text-primary);
       min-height: 100vh;
+      overflow-x: hidden;
+    }
+
+    body::before {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      bottom: 0;
+      background: 
+        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(124, 58, 237, 0.15), transparent),
+        radial-gradient(ellipse 60% 40% at 100% 0%, rgba(6, 182, 212, 0.1), transparent),
+        radial-gradient(ellipse 50% 30% at 0% 100%, rgba(236, 72, 153, 0.08), transparent);
+      pointer-events: none;
+      z-index: -1;
     }
     
     .container {
-      max-width: 1400px;
+      max-width: 1500px;
       margin: 0 auto;
-      padding: 2rem;
+      padding: 2rem 2.5rem;
     }
     
     header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 2rem;
-      padding-bottom: 1.5rem;
+      margin-bottom: 2.5rem;
+      padding-bottom: 2rem;
       border-bottom: 1px solid var(--border);
+      position: relative;
+    }
+
+    header::after {
+      content: '';
+      position: absolute;
+      bottom: -1px;
+      left: 0;
+      width: 120px;
+      height: 2px;
+      background: var(--gradient-1);
+      border-radius: 2px;
+    }
+
+    .logo-section {
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .logo-icon {
+      width: 48px;
+      height: 48px;
+      background: var(--gradient-1);
+      border-radius: 14px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 1.5rem;
+      box-shadow: 0 8px 32px var(--accent-glow);
     }
     
     h1 {
       font-size: 1.75rem;
-      font-weight: 600;
-      background: linear-gradient(135deg, var(--accent), #a855f7);
+      font-weight: 700;
+      letter-spacing: -0.02em;
+      background: var(--gradient-1);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+
+    h1 span {
+      font-weight: 400;
+      opacity: 0.7;
     }
     
     .stats {
       display: flex;
-      gap: 1.5rem;
+      gap: 1rem;
     }
     
     .stat {
-      background: var(--bg-secondary);
-      padding: 1rem 1.5rem;
-      border-radius: 12px;
+      background: var(--bg-glass);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      padding: 1rem 1.75rem;
+      border-radius: 16px;
       border: 1px solid var(--border);
+      position: relative;
+      overflow: hidden;
+      transition: all 0.3s ease;
+    }
+
+    .stat:hover {
+      border-color: var(--border-hover);
+      transform: translateY(-2px);
+    }
+
+    .stat::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.1), transparent);
     }
     
     .stat-value {
-      font-size: 1.5rem;
+      font-size: 1.75rem;
       font-weight: 700;
-      color: var(--accent);
+      background: var(--gradient-1);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      line-height: 1.2;
     }
     
     .stat-label {
-      font-size: 0.75rem;
-      color: var(--text-secondary);
+      font-size: 0.7rem;
+      color: var(--text-muted);
       text-transform: uppercase;
-      letter-spacing: 0.05em;
+      letter-spacing: 0.1em;
+      font-weight: 500;
+      margin-top: 0.25rem;
     }
     
     .controls {
       display: flex;
       gap: 1rem;
-      margin-bottom: 1.5rem;
+      margin-bottom: 2rem;
       flex-wrap: wrap;
+      align-items: center;
     }
     
     .search-box {
       flex: 1;
-      min-width: 250px;
+      min-width: 280px;
       position: relative;
     }
     
     .search-box input {
       width: 100%;
-      padding: 0.75rem 1rem 0.75rem 2.75rem;
-      background: var(--bg-secondary);
+      padding: 0.875rem 1.25rem 0.875rem 3rem;
+      background: var(--bg-glass);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 14px;
       color: var(--text-primary);
       font-size: 0.9rem;
-      transition: border-color 0.2s;
+      font-family: inherit;
+      transition: all 0.3s ease;
     }
     
     .search-box input:focus {
       outline: none;
       border-color: var(--accent);
+      box-shadow: 0 0 0 4px var(--accent-glow);
+    }
+
+    .search-box input::placeholder {
+      color: var(--text-muted);
     }
     
     .search-box::before {
-      content: "🔍";
+      content: "";
       position: absolute;
-      left: 1rem;
+      left: 1.1rem;
       top: 50%;
       transform: translateY(-50%);
-      font-size: 0.9rem;
+      width: 18px;
+      height: 18px;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M21 21l-6-6m2-5a7 7 0 11-14 0 7 7 0 0114 0z'/%3E%3C/svg%3E");
+      background-size: contain;
+      opacity: 0.6;
     }
     
     .btn {
-      padding: 0.75rem 1.25rem;
+      padding: 0.75rem 1.5rem;
       border: none;
-      border-radius: 8px;
+      border-radius: 12px;
       font-size: 0.875rem;
-      font-weight: 500;
+      font-weight: 600;
+      font-family: inherit;
       cursor: pointer;
-      transition: all 0.2s;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+      position: relative;
+      overflow: hidden;
     }
     
     .btn-primary {
-      background: var(--accent);
+      background: var(--gradient-1);
       color: white;
+      box-shadow: 0 4px 16px var(--accent-glow);
     }
     
     .btn-primary:hover {
-      background: var(--accent-hover);
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px var(--accent-glow);
     }
     
     .btn-secondary {
-      background: var(--bg-tertiary);
+      background: var(--bg-glass);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
       color: var(--text-primary);
       border: 1px solid var(--border);
     }
     
     .btn-secondary:hover {
-      background: var(--bg-secondary);
-    }
-    
-    .tabs {
-      display: flex;
-      gap: 0.5rem;
-      margin-bottom: 1.5rem;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 0.5rem;
-    }
-    
-    .tab {
-      padding: 0.5rem 1rem;
-      background: none;
-      border: none;
-      color: var(--text-secondary);
-      cursor: pointer;
-      font-size: 0.9rem;
-      border-radius: 6px;
-      transition: all 0.2s;
-    }
-    
-    .tab:hover {
-      color: var(--text-primary);
       background: var(--bg-tertiary);
-    }
-    
-    .tab.active {
-      color: var(--accent);
-      background: var(--bg-tertiary);
-    }
-    
-    .section {
-      display: none;
-    }
-    
-    .section.active {
-      display: block;
+      border-color: var(--border-hover);
     }
     
     .backend-card {
-      background: var(--bg-secondary);
+      background: var(--bg-card);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: 20px;
       margin-bottom: 1rem;
       overflow: hidden;
+      transition: all 0.3s ease;
+      position: relative;
+    }
+
+    .backend-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 1px;
+      background: linear-gradient(90deg, transparent, rgba(255,255,255,0.08), transparent);
+    }
+
+    .backend-card:hover {
+      border-color: var(--border-hover);
+      box-shadow: 0 8px 40px rgba(0, 0, 0, 0.2);
     }
     
     .backend-card.backend-disabled {
-      opacity: 0.7;
-      border-color: var(--text-secondary);
+      opacity: 0.5;
     }
     
     .backend-card.backend-disabled .backend-name {
-      color: var(--text-secondary);
+      color: var(--text-muted);
     }
     
     .disabled-badge {
-      background: var(--error);
+      background: linear-gradient(135deg, var(--error), #dc2626);
       color: white;
-      padding: 0.15rem 0.4rem;
-      border-radius: 4px;
-      font-size: 0.6rem;
-      margin-left: 0.5rem;
-      vertical-align: middle;
+      padding: 0.2rem 0.6rem;
+      border-radius: 6px;
+      font-size: 0.65rem;
+      font-weight: 600;
+      margin-left: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      box-shadow: 0 2px 8px var(--error-glow);
     }
 
     .disconnected-badge {
-      background: var(--warning, #f59e0b);
+      background: linear-gradient(135deg, var(--warning), #d97706);
       color: white;
-      padding: 0.15rem 0.4rem;
-      border-radius: 4px;
-      font-size: 0.6rem;
-      margin-left: 0.5rem;
-      vertical-align: middle;
+      padding: 0.2rem 0.6rem;
+      border-radius: 6px;
+      font-size: 0.65rem;
+      font-weight: 600;
+      margin-left: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      box-shadow: 0 2px 8px var(--warning-glow);
     }
 
     .no-tools-badge {
-      background: var(--text-secondary);
+      background: var(--text-muted);
       color: white;
-      padding: 0.15rem 0.4rem;
-      border-radius: 4px;
-      font-size: 0.6rem;
-      margin-left: 0.5rem;
-      vertical-align: middle;
+      padding: 0.2rem 0.6rem;
+      border-radius: 6px;
+      font-size: 0.65rem;
+      font-weight: 600;
+      margin-left: 0.75rem;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
     }
 
     .backend-card.backend-disconnected {
-      opacity: 0.8;
-      border-color: var(--warning, #f59e0b);
+      opacity: 0.75;
+      border-color: var(--warning);
     }
 
     .backend-card.backend-no-tools {
-      opacity: 0.7;
-      border-color: var(--text-secondary);
+      opacity: 0.6;
     }
 
     .backend-disabled-tool {
-      opacity: 0.6;
+      opacity: 0.5;
     }
     
     .backend-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 1rem 1.25rem;
+      padding: 1.25rem 1.5rem;
       cursor: pointer;
-      transition: background 0.2s;
+      transition: background 0.2s ease;
     }
     
     .backend-header:hover {
-      background: var(--bg-tertiary);
+      background: rgba(255, 255, 255, 0.02);
     }
     
     .backend-info {
@@ -721,42 +827,67 @@ function getDashboardHTML(): string {
     }
     
     .backend-status {
-      width: 10px;
-      height: 10px;
+      width: 12px;
+      height: 12px;
       border-radius: 50%;
+      position: relative;
+    }
+
+    .backend-status::after {
+      content: '';
+      position: absolute;
+      inset: -4px;
+      border-radius: 50%;
+      opacity: 0.3;
     }
     
     .backend-status.connected {
       background: var(--success);
-      box-shadow: 0 0 8px var(--success);
+      box-shadow: 0 0 12px var(--success-glow), 0 0 24px var(--success-glow);
+    }
+
+    .backend-status.connected::after {
+      background: var(--success);
+      animation: pulse 2s ease-in-out infinite;
     }
     
     .backend-status.error {
       background: var(--error);
-      box-shadow: 0 0 8px var(--error);
+      box-shadow: 0 0 12px var(--error-glow);
     }
     
     .backend-status.disconnected {
-      background: var(--text-secondary);
+      background: var(--text-muted);
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 0.3; transform: scale(1); }
+      50% { opacity: 0.1; transform: scale(1.5); }
     }
     
     .backend-name {
       font-weight: 600;
+      font-size: 1.05rem;
+      letter-spacing: -0.01em;
     }
     
     .backend-meta {
       font-size: 0.8rem;
       color: var(--text-secondary);
+      margin-top: 0.25rem;
     }
 
     .backend-error {
       color: var(--error);
       font-size: 0.75rem;
-      margin-top: 0.25rem;
+      margin-top: 0.35rem;
       max-width: 400px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
+      display: flex;
+      align-items: center;
+      gap: 0.35rem;
     }
 
     .backend-actions {
@@ -767,8 +898,8 @@ function getDashboardHTML(): string {
     
     .toggle {
       position: relative;
-      width: 44px;
-      height: 24px;
+      width: 52px;
+      height: 28px;
     }
     
     .toggle input {
@@ -785,76 +916,87 @@ function getDashboardHTML(): string {
       right: 0;
       bottom: 0;
       background: var(--bg-tertiary);
-      border-radius: 24px;
-      transition: 0.3s;
+      border-radius: 28px;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
       border: 1px solid var(--border);
     }
     
     .toggle-slider:before {
       position: absolute;
       content: "";
-      height: 18px;
-      width: 18px;
+      height: 22px;
+      width: 22px;
       left: 2px;
       bottom: 2px;
-      background: var(--text-secondary);
+      background: var(--text-muted);
       border-radius: 50%;
-      transition: 0.3s;
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
     }
     
     .toggle input:checked + .toggle-slider {
       background: var(--accent);
       border-color: var(--accent);
+      box-shadow: 0 0 16px var(--accent-glow);
     }
     
     .toggle input:checked + .toggle-slider:before {
-      transform: translateX(20px);
+      transform: translateX(24px);
       background: white;
     }
     
     .tools-list {
       max-height: 0;
       overflow: hidden;
-      transition: max-height 0.3s ease-out;
-      background: var(--bg-primary);
+      transition: max-height 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      background: rgba(0, 0, 0, 0.2);
     }
     
     .tools-list.expanded {
-      max-height: 2000px;
+      max-height: 3000px;
     }
     
     .tool-item {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 0.75rem 1.25rem;
+      padding: 1rem 1.5rem;
       border-top: 1px solid var(--border);
+      transition: background 0.2s ease;
     }
     
     .tool-item:hover {
-      background: var(--bg-tertiary);
+      background: rgba(255, 255, 255, 0.02);
     }
     
     .tool-name {
-      font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+      font-family: 'JetBrains Mono', monospace;
       font-size: 0.85rem;
-      color: var(--success);
+      font-weight: 500;
+      color: var(--accent-secondary);
+      padding: 0.25rem 0.5rem;
+      background: rgba(6, 182, 212, 0.1);
+      border-radius: 6px;
+      border: 1px solid rgba(6, 182, 212, 0.2);
     }
     
     .tool-name.disabled {
-      color: var(--text-secondary);
+      color: var(--text-muted);
+      background: rgba(100, 116, 139, 0.1);
+      border-color: rgba(100, 116, 139, 0.2);
       text-decoration: line-through;
     }
     
     .tool-desc {
       font-size: 0.8rem;
       color: var(--text-secondary);
-      margin-top: 0.25rem;
+      margin-top: 0.5rem;
       max-width: 600px;
+      line-height: 1.5;
     }
     
     .expand-icon {
-      transition: transform 0.2s;
+      transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      color: var(--text-muted);
     }
     
     .expanded .expand-icon {
@@ -866,13 +1008,17 @@ function getDashboardHTML(): string {
       bottom: 2rem;
       right: 2rem;
       background: var(--bg-secondary);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
       border: 1px solid var(--border);
-      padding: 1rem 1.5rem;
-      border-radius: 8px;
-      box-shadow: 0 4px 20px rgba(0,0,0,0.3);
-      transform: translateY(100px);
+      padding: 1rem 1.75rem;
+      border-radius: 14px;
+      box-shadow: 0 8px 32px rgba(0, 0, 0, 0.3);
+      transform: translateY(120px);
       opacity: 0;
-      transition: all 0.3s;
+      transition: all 0.4s cubic-bezier(0.4, 0, 0.2, 1);
+      font-weight: 500;
+      z-index: 9999;
     }
     
     .toast.show {
@@ -887,51 +1033,59 @@ function getDashboardHTML(): string {
     }
     
     .pill {
-      padding: 0.4rem 0.8rem;
-      background: var(--bg-tertiary);
+      padding: 0.5rem 1rem;
+      background: var(--bg-glass);
+      backdrop-filter: blur(10px);
+      -webkit-backdrop-filter: blur(10px);
       border: 1px solid var(--border);
-      border-radius: 20px;
-      font-size: 0.75rem;
+      border-radius: 24px;
+      font-size: 0.8rem;
+      font-weight: 500;
       cursor: pointer;
-      transition: all 0.2s;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
     }
     
     .pill:hover, .pill.active {
       background: var(--accent);
       border-color: var(--accent);
+      box-shadow: 0 4px 16px var(--accent-glow);
     }
 
     .pill.disconnected {
-      border-color: var(--warning, #f59e0b);
+      border-color: var(--warning);
       opacity: 0.7;
     }
 
     .pill.disabled {
       border-color: var(--error);
-      opacity: 0.6;
+      opacity: 0.5;
     }
 
     .pill.no-tools {
-      border-color: var(--text-secondary);
-      opacity: 0.5;
+      border-color: var(--text-muted);
+      opacity: 0.4;
     }
 
     .loading {
       text-align: center;
-      padding: 3rem;
+      padding: 4rem;
       color: var(--text-secondary);
+      font-size: 1rem;
     }
     
     .loading::after {
       content: "";
       display: inline-block;
-      width: 20px;
-      height: 20px;
+      width: 24px;
+      height: 24px;
       border: 2px solid var(--border);
       border-top-color: var(--accent);
       border-radius: 50%;
-      animation: spin 1s linear infinite;
-      margin-left: 0.5rem;
+      animation: spin 0.8s linear infinite;
+      margin-left: 0.75rem;
       vertical-align: middle;
     }
     
@@ -946,22 +1100,24 @@ function getDashboardHTML(): string {
     }
     
     .badge {
-      background: var(--accent);
+      background: var(--gradient-1);
       color: white;
-      padding: 0.2rem 0.5rem;
-      border-radius: 10px;
+      padding: 0.2rem 0.6rem;
+      border-radius: 12px;
       font-size: 0.7rem;
-      font-weight: 600;
+      font-weight: 700;
     }
 
     .btn-restart {
-      background: var(--warning);
-      color: #000;
+      background: linear-gradient(135deg, var(--warning), #d97706);
+      color: white;
       font-weight: 600;
+      box-shadow: 0 4px 16px var(--warning-glow);
     }
 
     .btn-restart:hover {
-      background: #e6a000;
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px var(--warning-glow);
     }
 
     .header-actions {
@@ -971,27 +1127,32 @@ function getDashboardHTML(): string {
     }
 
     .btn-success {
-      background: var(--success);
-      color: #000;
+      background: linear-gradient(135deg, var(--success), #059669);
+      color: white;
       font-weight: 600;
+      box-shadow: 0 4px 16px var(--success-glow);
     }
 
     .btn-success:hover {
-      background: #1eb854;
+      transform: translateY(-2px);
+      box-shadow: 0 8px 24px var(--success-glow);
     }
 
     .btn-danger {
-      background: var(--error);
+      background: linear-gradient(135deg, var(--error), #dc2626);
       color: white;
+      box-shadow: 0 4px 12px var(--error-glow);
     }
 
     .btn-danger:hover {
-      background: #dc2626;
+      transform: translateY(-2px);
+      box-shadow: 0 8px 20px var(--error-glow);
     }
 
     .btn-small {
-      padding: 0.4rem 0.75rem;
+      padding: 0.5rem 0.875rem;
       font-size: 0.75rem;
+      border-radius: 10px;
     }
 
     /* Modal styles */
@@ -1001,14 +1162,16 @@ function getDashboardHTML(): string {
       left: 0;
       right: 0;
       bottom: 0;
-      background: rgba(0, 0, 0, 0.8);
+      background: rgba(0, 0, 0, 0.85);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
       display: flex;
       justify-content: center;
       align-items: center;
       z-index: 1000;
       opacity: 0;
       visibility: hidden;
-      transition: all 0.3s;
+      transition: all 0.3s ease;
     }
 
     .modal-overlay.show {
@@ -1018,81 +1181,107 @@ function getDashboardHTML(): string {
 
     .modal {
       background: var(--bg-secondary);
+      backdrop-filter: blur(40px);
+      -webkit-backdrop-filter: blur(40px);
       border: 1px solid var(--border);
-      border-radius: 16px;
+      border-radius: 24px;
       width: 90%;
-      max-width: 600px;
+      max-width: 640px;
       max-height: 90vh;
       overflow-y: auto;
-      transform: translateY(-20px);
-      transition: transform 0.3s;
+      transform: translateY(-20px) scale(0.95);
+      transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+      box-shadow: 0 24px 80px rgba(0, 0, 0, 0.5);
     }
 
     .modal-overlay.show .modal {
-      transform: translateY(0);
+      transform: translateY(0) scale(1);
     }
 
     .modal-header {
       display: flex;
       justify-content: space-between;
       align-items: center;
-      padding: 1.25rem 1.5rem;
+      padding: 1.5rem 2rem;
       border-bottom: 1px solid var(--border);
+      position: relative;
+    }
+
+    .modal-header::after {
+      content: '';
+      position: absolute;
+      bottom: -1px;
+      left: 2rem;
+      width: 60px;
+      height: 2px;
+      background: var(--gradient-1);
+      border-radius: 2px;
     }
 
     .modal-header h2 {
-      font-size: 1.25rem;
-      font-weight: 600;
+      font-size: 1.35rem;
+      font-weight: 700;
+      letter-spacing: -0.02em;
     }
 
     .modal-close {
-      background: none;
-      border: none;
+      background: var(--bg-tertiary);
+      border: 1px solid var(--border);
       color: var(--text-secondary);
-      font-size: 1.5rem;
+      width: 36px;
+      height: 36px;
+      border-radius: 10px;
       cursor: pointer;
-      padding: 0.25rem;
-      line-height: 1;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      transition: all 0.2s ease;
     }
 
     .modal-close:hover {
       color: var(--text-primary);
+      border-color: var(--border-hover);
+      background: var(--bg-glass);
     }
 
     .modal-body {
-      padding: 1.5rem;
+      padding: 2rem;
     }
 
     .modal-footer {
       display: flex;
       justify-content: flex-end;
       gap: 0.75rem;
-      padding: 1rem 1.5rem;
+      padding: 1.25rem 2rem;
       border-top: 1px solid var(--border);
+      background: rgba(0, 0, 0, 0.1);
     }
 
     .form-group {
-      margin-bottom: 1.25rem;
+      margin-bottom: 1.5rem;
     }
 
     .form-group label {
       display: block;
-      margin-bottom: 0.5rem;
-      font-size: 0.875rem;
+      margin-bottom: 0.6rem;
+      font-size: 0.85rem;
+      font-weight: 500;
       color: var(--text-secondary);
+      letter-spacing: 0.01em;
     }
 
     .form-group input,
     .form-group select,
     .form-group textarea {
       width: 100%;
-      padding: 0.75rem 1rem;
+      padding: 0.875rem 1.125rem;
       background: var(--bg-tertiary);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 12px;
       color: var(--text-primary);
       font-size: 0.9rem;
       font-family: inherit;
+      transition: all 0.2s ease;
     }
 
     .form-group input:focus,
@@ -1100,44 +1289,63 @@ function getDashboardHTML(): string {
     .form-group textarea:focus {
       outline: none;
       border-color: var(--accent);
+      box-shadow: 0 0 0 4px var(--accent-glow);
+    }
+
+    .form-group input::placeholder,
+    .form-group textarea::placeholder {
+      color: var(--text-muted);
+    }
+
+    .form-group select {
+      cursor: pointer;
+      appearance: none;
+      background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' fill='none' viewBox='0 0 24 24' stroke='%2394a3b8'%3E%3Cpath stroke-linecap='round' stroke-linejoin='round' stroke-width='2' d='M19 9l-7 7-7-7'/%3E%3C/svg%3E");
+      background-repeat: no-repeat;
+      background-position: right 1rem center;
+      background-size: 16px;
+      padding-right: 2.5rem;
     }
 
     .form-group textarea {
       resize: vertical;
-      min-height: 80px;
-      font-family: 'SF Mono', Monaco, 'Courier New', monospace;
+      min-height: 100px;
+      font-family: 'JetBrains Mono', monospace;
+      font-size: 0.85rem;
+      line-height: 1.6;
     }
 
     .form-group small {
       display: block;
-      margin-top: 0.25rem;
+      margin-top: 0.5rem;
       font-size: 0.75rem;
-      color: var(--text-secondary);
+      color: var(--text-muted);
     }
 
     .form-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
-      gap: 1rem;
+      gap: 1.25rem;
     }
 
     .transport-fields {
-      background: var(--bg-primary);
+      background: rgba(0, 0, 0, 0.2);
       border: 1px solid var(--border);
-      border-radius: 8px;
-      padding: 1rem;
-      margin-top: 0.5rem;
+      border-radius: 14px;
+      padding: 1.25rem;
+      margin-top: 0.75rem;
     }
 
     .test-result {
-      margin-top: 1rem;
-      padding: 1rem;
-      border-radius: 8px;
+      margin-top: 1.25rem;
+      padding: 1.125rem;
+      border-radius: 12px;
       font-size: 0.875rem;
+      font-weight: 500;
     }
 
     .test-result.success {
-      background: rgba(34, 197, 94, 0.1);
+      background: rgba(16, 185, 129, 0.1);
       border: 1px solid var(--success);
       color: var(--success);
     }
@@ -1149,7 +1357,7 @@ function getDashboardHTML(): string {
     }
 
     .test-result.loading {
-      background: rgba(99, 102, 241, 0.1);
+      background: rgba(124, 58, 237, 0.1);
       border: 1px solid var(--accent);
       color: var(--accent);
     }
@@ -1161,12 +1369,13 @@ function getDashboardHTML(): string {
 
     .confirm-dialog {
       text-align: center;
-      padding: 1rem;
+      padding: 1.5rem;
     }
 
     .confirm-dialog p {
       margin-bottom: 1.5rem;
       color: var(--text-secondary);
+      line-height: 1.6;
     }
 
     .confirm-dialog strong {
@@ -1177,13 +1386,13 @@ function getDashboardHTML(): string {
     .checkbox-group {
       display: flex;
       align-items: center;
-      gap: 0.75rem;
-      padding: 0.75rem 1rem;
+      gap: 0.875rem;
+      padding: 1rem 1.25rem;
       background: var(--bg-tertiary);
       border: 1px solid var(--border);
-      border-radius: 8px;
+      border-radius: 12px;
       cursor: pointer;
-      transition: border-color 0.2s;
+      transition: all 0.2s ease;
     }
 
     .checkbox-group:hover {
@@ -1191,22 +1400,112 @@ function getDashboardHTML(): string {
     }
 
     .checkbox-group input[type="checkbox"] {
-      width: 18px;
-      height: 18px;
+      width: 20px;
+      height: 20px;
       accent-color: var(--accent);
       cursor: pointer;
+      border-radius: 4px;
     }
 
     .checkbox-group span {
       font-size: 0.9rem;
       color: var(--text-primary);
+      font-weight: 500;
+    }
+
+    /* Empty state */
+    .empty-state {
+      text-align: center;
+      padding: 4rem 2rem;
+      color: var(--text-secondary);
+    }
+
+    .empty-state-icon {
+      font-size: 4rem;
+      margin-bottom: 1.5rem;
+      opacity: 0.3;
+    }
+
+    .empty-state h3 {
+      font-size: 1.25rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 0.5rem;
+    }
+
+    /* Scrollbar styling */
+    ::-webkit-scrollbar {
+      width: 8px;
+      height: 8px;
+    }
+
+    ::-webkit-scrollbar-track {
+      background: transparent;
+    }
+
+    ::-webkit-scrollbar-thumb {
+      background: var(--border);
+      border-radius: 4px;
+    }
+
+    ::-webkit-scrollbar-thumb:hover {
+      background: var(--border-hover);
+    }
+
+    /* Responsive */
+    @media (max-width: 1024px) {
+      .header-actions {
+        flex-wrap: wrap;
+      }
+      
+      .stats {
+        gap: 0.75rem;
+      }
+
+      .stat {
+        padding: 0.75rem 1rem;
+      }
+
+      .stat-value {
+        font-size: 1.35rem;
+      }
+    }
+
+    @media (max-width: 768px) {
+      .container {
+        padding: 1.5rem;
+      }
+
+      header {
+        flex-direction: column;
+        gap: 1.5rem;
+        align-items: flex-start;
+      }
+
+      .header-actions {
+        width: 100%;
+        justify-content: space-between;
+      }
+
+      .form-row {
+        grid-template-columns: 1fr;
+      }
+
+      .backend-buttons {
+        flex-wrap: wrap;
+      }
     }
   </style>
 </head>
 <body>
   <div class="container">
     <header>
-      <h1>MCP Gateway</h1>
+      <div class="logo-section">
+        <div class="logo-icon">⚡</div>
+        <div>
+          <h1>MCP Gateway</h1>
+        </div>
+      </div>
       <div class="header-actions">
         <div class="stats">
           <div class="stat">
@@ -1222,19 +1521,31 @@ function getDashboardHTML(): string {
             <div class="stat-label">Backends</div>
           </div>
         </div>
-        <button class="btn btn-success" onclick="openAddServerModal()">+ Add Server</button>
-        <button class="btn btn-restart" onclick="restartServer()">Restart Server</button>
+        <button class="btn btn-success" onclick="openAddServerModal()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="5" x2="12" y2="19"></line><line x1="5" y1="12" x2="19" y2="12"></line></svg>
+          Add Server
+        </button>
+        <button class="btn btn-restart" onclick="restartServer()">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+          Restart
+        </button>
       </div>
     </header>
     
     <div class="controls">
       <div class="search-box">
-        <input type="text" id="search" placeholder="Search tools..." />
+        <input type="text" id="search" placeholder="Search tools by name or description..." />
       </div>
       <div class="filter-pills" id="backend-filters"></div>
       <div class="quick-actions">
-        <button class="btn btn-secondary" onclick="enableAll()">Enable All</button>
-        <button class="btn btn-secondary" onclick="disableAll()">Disable All</button>
+        <button class="btn btn-secondary" onclick="enableAll()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+          Enable All
+        </button>
+        <button class="btn btn-secondary" onclick="disableAll()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          Disable All
+        </button>
       </div>
     </div>
     
@@ -1250,7 +1561,9 @@ function getDashboardHTML(): string {
     <div class="modal">
       <div class="modal-header">
         <h2 id="modal-title">Add Server</h2>
-        <button class="modal-close" onclick="closeServerModal()">&times;</button>
+        <button class="modal-close" onclick="closeServerModal()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
       </div>
       <div class="modal-body">
         <form id="server-form">
@@ -1270,7 +1583,7 @@ function getDashboardHTML(): string {
 
           <div class="form-group">
             <label for="server-description">Description</label>
-            <input type="text" id="server-description" placeholder="What this server does">
+            <input type="text" id="server-description" placeholder="Brief description of what this server does">
           </div>
 
           <div class="form-row">
@@ -1336,7 +1649,10 @@ function getDashboardHTML(): string {
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeServerModal()">Cancel</button>
-        <button class="btn btn-secondary" onclick="testServerConnection()">Test Connection</button>
+        <button class="btn btn-secondary" onclick="testServerConnection()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>
+          Test Connection
+        </button>
         <button class="btn btn-primary" onclick="saveServer()">Save Server</button>
       </div>
     </div>
@@ -1344,20 +1660,26 @@ function getDashboardHTML(): string {
 
   <!-- Delete Confirmation Modal -->
   <div class="modal-overlay" id="delete-modal">
-    <div class="modal" style="max-width: 400px;">
+    <div class="modal" style="max-width: 440px;">
       <div class="modal-header">
         <h2>Delete Server</h2>
-        <button class="modal-close" onclick="closeDeleteModal()">&times;</button>
+        <button class="modal-close" onclick="closeDeleteModal()">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+        </button>
       </div>
       <div class="modal-body">
         <div class="confirm-dialog">
+          <div style="font-size: 3rem; margin-bottom: 1rem; opacity: 0.5;">⚠️</div>
           <p>Are you sure you want to delete <strong id="delete-server-name"></strong>?</p>
-          <p>This will disconnect the server and remove it from the configuration. This action cannot be undone.</p>
+          <p style="font-size: 0.85rem; opacity: 0.7;">This will disconnect the server and remove it from the configuration. This action cannot be undone.</p>
         </div>
       </div>
       <div class="modal-footer">
         <button class="btn btn-secondary" onclick="closeDeleteModal()">Cancel</button>
-        <button class="btn btn-danger" onclick="confirmDeleteServer()">Delete Server</button>
+        <button class="btn btn-danger" onclick="confirmDeleteServer()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
+          Delete Server
+        </button>
       </div>
     </div>
   </div>
@@ -1467,6 +1789,17 @@ function getDashboardHTML(): string {
         ? backends.filter(b => b.id === selectedBackend)
         : backends;
 
+      if (filteredBackends.length === 0) {
+        container.innerHTML = \`
+          <div class="empty-state">
+            <div class="empty-state-icon">🔌</div>
+            <h3>No servers configured</h3>
+            <p>Add your first MCP server to get started</p>
+          </div>
+        \`;
+        return;
+      }
+
       container.innerHTML = filteredBackends.map(backend => {
         const backendTools = getToolsForBackend(backend.id);
         const enabledCount = backendTools.filter(t => t.enabled && !t.backendDisabled).length;
@@ -1485,11 +1818,11 @@ function getDashboardHTML(): string {
         // Determine badge to show
         let badge = '';
         if (isBackendDisabled) {
-          badge = '<span class="disabled-badge">DISABLED</span>';
+          badge = '<span class="disabled-badge">Disabled</span>';
         } else if (isDisconnected) {
-          badge = '<span class="disconnected-badge">DISCONNECTED</span>';
+          badge = '<span class="disconnected-badge">Disconnected</span>';
         } else if (hasNoTools) {
-          badge = '<span class="no-tools-badge">NO TOOLS</span>';
+          badge = '<span class="no-tools-badge">No Tools</span>';
         }
 
         // Error message for disconnected servers
@@ -1501,26 +1834,29 @@ function getDashboardHTML(): string {
               <div class="backend-info">
                 <div class="backend-status \${backend.status}" \${errorMessage ? \`title="\${errorMessage}"\` : ''}></div>
                 <div>
-                  <div class="backend-name">\${backend.id} \${badge}</div>
+                  <div class="backend-name">\${escapeHtml(backend.id)} \${badge}</div>
                   <div class="backend-meta">
-                    \${enabledCount}/\${backendTools.length} tools enabled • \${backend.status}
-                    \${errorMessage ? \`<div class="backend-error">⚠️ \${errorMessage}</div>\` : ''}
+                    <span style="color: var(--accent-secondary)">\${enabledCount}</span>/\${backendTools.length} tools enabled · \${backend.status}
+                    \${errorMessage ? \`<div class="backend-error"><svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M10.29 3.86L1.82 18a2 2 0 0 0 1.71 3h16.94a2 2 0 0 0 1.71-3L13.71 3.86a2 2 0 0 0-3.42 0z"></path><line x1="12" y1="9" x2="12" y2="13"></line><line x1="12" y1="17" x2="12.01" y2="17"></line></svg> \${errorMessage}</div>\` : ''}
                   </div>
                 </div>
               </div>
               <div class="backend-actions">
                 <div class="backend-buttons">
                   <button class="btn btn-secondary btn-small" onclick="event.stopPropagation(); toggleAllBackendTools('\${backend.id}', true)">
-                    Enable All
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="20 6 9 17 4 12"></polyline></svg>
+                    Enable
                   </button>
                   <button class="btn btn-secondary btn-small" onclick="event.stopPropagation(); toggleAllBackendTools('\${backend.id}', false)">
-                    Disable All
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+                    Disable
                   </button>
                   <button class="btn btn-secondary btn-small" onclick="event.stopPropagation(); openEditServerModal('\${backend.id}')">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                     Edit
                   </button>
                   <button class="btn btn-danger btn-small" onclick="event.stopPropagation(); openDeleteModal('\${backend.id}')">
-                    Delete
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                   </button>
                 </div>
                 <label class="toggle" onclick="event.stopPropagation()">
@@ -1528,11 +1864,17 @@ function getDashboardHTML(): string {
                          onchange="toggleBackend('\${backend.id}', this.checked)">
                   <span class="toggle-slider"></span>
                 </label>
-                <span class="expand-icon">▼</span>
+                <span class="expand-icon">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="6 9 12 15 18 9"></polyline></svg>
+                </span>
               </div>
             </div>
             <div class="tools-list \${isExpanded ? 'expanded' : ''}" id="tools-\${backend.id}">
-              \${backendTools.map(tool => \`
+              \${backendTools.length === 0 ? \`
+                <div class="tool-item" style="justify-content: center; color: var(--text-muted); padding: 2rem;">
+                  <span>No tools available from this server</span>
+                </div>
+              \` : backendTools.map(tool => \`
                 <div class="tool-item \${tool.backendDisabled ? 'backend-disabled-tool' : ''}">
                   <div>
                     <div class="tool-name \${(tool.enabled && !tool.backendDisabled) ? '' : 'disabled'}">\${escapeHtml(tool.name)}</div>
@@ -1730,13 +2072,17 @@ function getDashboardHTML(): string {
     
     function showToast(message, isError = false) {
       const toast = document.getElementById('toast');
-      toast.textContent = message;
+      const icon = isError 
+        ? '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right: 8px; vertical-align: -4px;"><circle cx="12" cy="12" r="10"></circle><line x1="15" y1="9" x2="9" y2="15"></line><line x1="9" y1="9" x2="15" y2="15"></line></svg>'
+        : '<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" style="margin-right: 8px; vertical-align: -4px;"><path d="M22 11.08V12a10 10 0 1 1-5.93-9.14"></path><polyline points="22 4 12 14.01 9 11.01"></polyline></svg>';
+      toast.innerHTML = icon + message;
       toast.style.borderColor = isError ? 'var(--error)' : 'var(--success)';
+      toast.style.color = isError ? 'var(--error)' : 'var(--success)';
       toast.classList.add('show');
 
       setTimeout(() => {
         toast.classList.remove('show');
-      }, 2000);
+      }, 2500);
     }
 
     async function restartServer() {
