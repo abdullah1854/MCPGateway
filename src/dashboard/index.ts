@@ -465,29 +465,29 @@ function getDashboardHTML(): string {
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <style>
     :root {
-      --bg-primary: #08080c;
-      --bg-secondary: rgba(16, 16, 24, 0.8);
-      --bg-tertiary: rgba(24, 24, 36, 0.9);
-      --bg-card: rgba(20, 20, 32, 0.6);
-      --bg-glass: rgba(255, 255, 255, 0.02);
-      --accent: #7c3aed;
-      --accent-secondary: #06b6d4;
-      --accent-glow: rgba(124, 58, 237, 0.4);
-      --accent-hover: #8b5cf6;
-      --success: #10b981;
-      --success-glow: rgba(16, 185, 129, 0.3);
-      --warning: #f59e0b;
-      --warning-glow: rgba(245, 158, 11, 0.3);
-      --error: #ef4444;
-      --error-glow: rgba(239, 68, 68, 0.3);
-      --text-primary: #f8fafc;
-      --text-secondary: #94a3b8;
-      --text-muted: #64748b;
-      --border: rgba(148, 163, 184, 0.1);
-      --border-hover: rgba(148, 163, 184, 0.2);
-      --gradient-1: linear-gradient(135deg, #7c3aed 0%, #06b6d4 100%);
-      --gradient-2: linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%);
-      --gradient-3: linear-gradient(180deg, rgba(124, 58, 237, 0.1) 0%, transparent 100%);
+      --bg-primary: #0a0a0f;
+      --bg-secondary: rgba(18, 18, 28, 0.95);
+      --bg-tertiary: rgba(28, 28, 42, 0.95);
+      --bg-card: rgba(24, 24, 40, 0.85);
+      --bg-glass: rgba(255, 255, 255, 0.05);
+      --accent: #8b5cf6;
+      --accent-secondary: #22d3ee;
+      --accent-glow: rgba(139, 92, 246, 0.5);
+      --accent-hover: #a78bfa;
+      --success: #34d399;
+      --success-glow: rgba(52, 211, 153, 0.4);
+      --warning: #fbbf24;
+      --warning-glow: rgba(251, 191, 36, 0.4);
+      --error: #f87171;
+      --error-glow: rgba(248, 113, 113, 0.4);
+      --text-primary: #ffffff;
+      --text-secondary: #cbd5e1;
+      --text-muted: #94a3b8;
+      --border: rgba(148, 163, 184, 0.2);
+      --border-hover: rgba(148, 163, 184, 0.4);
+      --gradient-1: linear-gradient(135deg, #8b5cf6 0%, #22d3ee 100%);
+      --gradient-2: linear-gradient(135deg, #f472b6 0%, #a78bfa 100%);
+      --gradient-3: linear-gradient(180deg, rgba(139, 92, 246, 0.15) 0%, transparent 100%);
     }
     
     * {
@@ -749,62 +749,64 @@ function getDashboardHTML(): string {
     }
     
     .backend-card.backend-disabled {
-      opacity: 0.5;
+      opacity: 0.7;
     }
     
     .backend-card.backend-disabled .backend-name {
-      color: var(--text-muted);
+      color: var(--text-secondary);
     }
     
     .disabled-badge {
-      background: linear-gradient(135deg, var(--error), #dc2626);
+      background: linear-gradient(135deg, #fb7185, #f43f5e);
       color: white;
-      padding: 0.2rem 0.6rem;
+      padding: 0.25rem 0.75rem;
       border-radius: 6px;
-      font-size: 0.65rem;
-      font-weight: 600;
+      font-size: 0.7rem;
+      font-weight: 700;
       margin-left: 0.75rem;
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      box-shadow: 0 2px 8px var(--error-glow);
+      box-shadow: 0 2px 12px rgba(244, 63, 94, 0.5);
     }
 
     .disconnected-badge {
-      background: linear-gradient(135deg, var(--warning), #d97706);
-      color: white;
-      padding: 0.2rem 0.6rem;
+      background: linear-gradient(135deg, #fbbf24, #f59e0b);
+      color: #1a1a1a;
+      padding: 0.25rem 0.75rem;
       border-radius: 6px;
-      font-size: 0.65rem;
-      font-weight: 600;
+      font-size: 0.7rem;
+      font-weight: 700;
       margin-left: 0.75rem;
       text-transform: uppercase;
       letter-spacing: 0.05em;
-      box-shadow: 0 2px 8px var(--warning-glow);
+      box-shadow: 0 2px 12px rgba(251, 191, 36, 0.5);
     }
 
     .no-tools-badge {
-      background: var(--text-muted);
+      background: linear-gradient(135deg, #94a3b8, #64748b);
       color: white;
-      padding: 0.2rem 0.6rem;
+      padding: 0.25rem 0.75rem;
       border-radius: 6px;
-      font-size: 0.65rem;
-      font-weight: 600;
+      font-size: 0.7rem;
+      font-weight: 700;
       margin-left: 0.75rem;
       text-transform: uppercase;
       letter-spacing: 0.05em;
+      box-shadow: 0 2px 8px rgba(148, 163, 184, 0.4);
     }
 
     .backend-card.backend-disconnected {
-      opacity: 0.75;
+      opacity: 0.85;
       border-color: var(--warning);
+      border-width: 2px;
     }
 
     .backend-card.backend-no-tools {
-      opacity: 0.6;
+      opacity: 0.75;
     }
 
     .backend-disabled-tool {
-      opacity: 0.5;
+      opacity: 0.7;
     }
     
     .backend-header {
@@ -878,16 +880,18 @@ function getDashboardHTML(): string {
     }
 
     .backend-error {
-      color: var(--error);
-      font-size: 0.75rem;
+      color: #fca5a5;
+      font-size: 0.8rem;
+      font-weight: 500;
       margin-top: 0.35rem;
-      max-width: 400px;
+      max-width: 500px;
       overflow: hidden;
       text-overflow: ellipsis;
       white-space: nowrap;
       display: flex;
       align-items: center;
       gap: 0.35rem;
+      text-shadow: 0 0 10px rgba(248, 113, 113, 0.3);
     }
 
     .backend-actions {
@@ -1056,17 +1060,19 @@ function getDashboardHTML(): string {
 
     .pill.disconnected {
       border-color: var(--warning);
-      opacity: 0.7;
+      opacity: 0.85;
+      border-width: 2px;
     }
 
     .pill.disabled {
       border-color: var(--error);
-      opacity: 0.5;
+      opacity: 0.75;
+      border-width: 2px;
     }
 
     .pill.no-tools {
       border-color: var(--text-muted);
-      opacity: 0.4;
+      opacity: 0.65;
     }
 
     .loading {
