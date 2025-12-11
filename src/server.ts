@@ -154,6 +154,43 @@ export class MCPGatewayServer {
       res.json(body);
     });
 
+    // Backend reconnect endpoint (for re-authentication scenarios like Azure token refresh)
+    this.app.post('/api/backends/:id/reconnect', async (req: Request, res: Response) => {
+      const { id } = req.params;
+      const backend = this.backendManager.getBackend(id);
+
+      if (!backend) {
+        res.status(404).json({
+          error: 'Backend not found',
+          message: `No backend with id '${id}' exists`,
+          availableBackends: Array.from(this.backendManager.getBackends().keys()),
+        });
+        return;
+      }
+
+      logger.info(`Reconnecting backend: ${id}`);
+
+      try {
+        await backend.disconnect();
+        await backend.connect();
+
+        res.json({
+          success: true,
+          message: `Backend '${id}' reconnected successfully`,
+          status: backend.status,
+          toolCount: backend.tools.length,
+        });
+      } catch (error) {
+        logger.error(`Failed to reconnect backend ${id}`, {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        res.status(500).json({
+          success: false,
+          error: error instanceof Error ? error.message : String(error),
+        });
+      }
+    });
+
     // Dashboard UI
     this.app.use('/dashboard', createDashboardRoutes(this.backendManager));
 

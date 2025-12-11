@@ -31,11 +31,13 @@ async function main(): Promise<void> {
   // Create and start server
   const server = new MCPGatewayServer(gatewayConfig);
 
-  // Load backend servers
-  await server.loadBackends(serversConfig);
-
-  // Start the server
+  // Start the HTTP server immediately (don't wait for backends)
   await server.start();
+
+  // Load backend servers in the background (non-blocking)
+  server.loadBackends(serversConfig).catch((error) => {
+    logger.error('Error loading backends', { error: error.message });
+  });
 
   // Handle graceful shutdown
   const shutdown = async (signal: string) => {

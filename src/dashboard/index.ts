@@ -3,6 +3,9 @@
  */
 
 import { Router, Request, Response } from 'express';
+import { exec } from 'child_process';
+import fs from 'fs';
+import path from 'path';
 import { BackendManager } from '../backend/index.js';
 import ConfigManager from '../config.js';
 import { ServerConfigSchema, ServerConfig } from '../types.js';
@@ -55,12 +58,17 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
     const disabledBackends = backendManager.getDisabledBackends();
     
     const toolsWithStatus = tools.map(tool => {
-      // Check if tool's backend is disabled
-      const backendId = findBackendIdForTool(tool.name, backendManager);
+      // Prefer authoritative mapping from backend manager; fall back to prefix heuristic
+      const backendId =
+        typeof backendManager.getBackendForTool === 'function'
+          ? backendManager.getBackendForTool(tool.name)
+          : findBackendIdForTool(tool.name, backendManager);
+
       const backendDisabled = backendId ? disabledBackends.has(backendId) : false;
       
       return {
         ...tool,
+        backendId,
         enabled: !disabledTools.has(tool.name) && !backendDisabled,
         backendDisabled,
       };
@@ -157,6 +165,112 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
       disabledTools: disabledTools.size,
       backends: backendManager.getStatus(),
     });
+  });
+
+  // API: Trigger Fabric login (az login with Fabric scope)
+  router.post('/api/fabric/login', async (_req: Request, res: Response) => {
+    try {
+      const scriptCandidates = [
+        path.resolve(process.cwd(), 'scripts/fabric-login.sh'),
+        path.resolve(process.cwd(), '../scripts/fabric-login.sh'),
+      ];
+
+      const scriptPath = scriptCandidates.find(p => fs.existsSync(p));
+      const command =
+        process.env.FABRIC_LOGIN_CMD ||
+        (scriptPath ? `"${scriptPath}"` : 'az login --scope https://api.fabric.microsoft.com/.default');
+
+      // Run the login command with a timeout; stream output is not returned to client
+      await new Promise<void>((resolve, reject) => {
+        exec(
+          command,
+          {
+            timeout: 120_000,
+          },
+          (error, _stdout, stderr) => {
+            if (error) {
+              reject(new Error(stderr || error.message));
+            } else {
+              resolve();
+            }
+          }
+        );
+      });
+
+      res.json({
+        success: true,
+        message: scriptPath
+          ? `Fabric login started via script: ${scriptPath}`
+          : 'Fabric login started (az login with Fabric scope)',
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to start Fabric login',
+      });
+    }
+  });
+
+  // API: Check Fabric token validity by fetching workspaces
+  router.post('/api/fabric/check', async (_req: Request, res: Response) => {
+    try {
+      // Get token JSON for expiresOn and access token
+      const tokenJson = await new Promise<string>((resolve, reject) => {
+        exec(
+          'az account get-access-token --resource https://api.fabric.microsoft.com',
+          { timeout: 15000 },
+          (error, stdout, stderr) => {
+            if (error) {
+              reject(new Error(stderr || error.message));
+            } else {
+              resolve(stdout);
+            }
+          }
+        );
+      });
+
+      const tokenData = JSON.parse(tokenJson);
+      const accessToken = tokenData.accessToken;
+      const expiresOn = tokenData.expiresOn || tokenData.expires_on;
+
+      if (!accessToken) {
+        throw new Error('No access token returned by az CLI');
+      }
+
+      // Probe Fabric workspaces to validate the token
+      const controller = new AbortController();
+      const timeout = setTimeout(() => controller.abort(), 5000);
+      let workspaceOk = false;
+      let workspaceError: string | undefined;
+      try {
+        const resp = await fetch('https://api.fabric.microsoft.com/v1/workspaces', {
+          method: 'GET',
+          headers: { Authorization: `Bearer ${accessToken}` },
+          signal: controller.signal,
+        });
+        workspaceOk = resp.ok;
+        if (!resp.ok) {
+          const body = await resp.text();
+          workspaceError = `HTTP ${resp.status}: ${body}`;
+        }
+      } catch (e) {
+        workspaceError = e instanceof Error ? e.message : 'Unknown error';
+      } finally {
+        clearTimeout(timeout);
+      }
+
+      res.json({
+        success: true,
+        expiresOn,
+        workspaceProbe: workspaceOk ? 'ok' : 'failed',
+        workspaceError,
+      });
+    } catch (error) {
+      res.status(500).json({
+        success: false,
+        error: error instanceof Error ? error.message : 'Failed to check Fabric token',
+      });
+    }
   });
 
   // API: Restart server
@@ -637,6 +751,39 @@ function getDashboardHTML(): string {
       flex-wrap: wrap;
       align-items: center;
     }
+
+    .section-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin: 0 0 1rem 0;
+      gap: 1rem;
+    }
+
+    .section-title {
+      font-size: 1.05rem;
+      font-weight: 700;
+      letter-spacing: -0.01em;
+      color: var(--text-primary);
+    }
+
+    .section-subtitle {
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      margin-top: 0.35rem;
+      line-height: 1.4;
+    }
+
+    .section-hint {
+      color: var(--text-muted);
+      font-size: 0.85rem;
+      padding: 0.5rem 0.75rem;
+      background: var(--bg-glass);
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+    }
     
     .search-box {
       flex: 1;
@@ -956,13 +1103,14 @@ function getDashboardHTML(): string {
     }
     
     .tools-list.expanded {
-      max-height: 3000px;
+      max-height: 9999px; /* allow long subtool lists */
     }
     
     .tool-item {
       display: flex;
       justify-content: space-between;
-      align-items: center;
+      align-items: flex-start;
+      gap: 1rem;
       padding: 1rem 1.5rem;
       border-top: 1px solid var(--border);
       transition: background 0.2s ease;
@@ -1554,6 +1702,14 @@ function getDashboardHTML(): string {
         </button>
       </div>
     </div>
+
+    <div class="section-header">
+      <div>
+        <div class="section-title">Servers &amp; tools</div>
+        <div class="section-subtitle">Toggle connections, filter by backend, and expand to view every tool/subtool.</div>
+      </div>
+      <div class="section-hint">Tip: click a server card to expand all tools</div>
+    </div>
     
     <div id="backends-container">
       <div class="loading">Loading backends</div>
@@ -1754,15 +1910,30 @@ function getDashboardHTML(): string {
     }
     
     function getBackendToolCount(backendId) {
-      const prefix = getBackendPrefix(backendId);
-      return tools.filter(t => t.name.startsWith(prefix + '_') || 
-        (prefix === '' && !t.name.includes('_'))).length;
+      return tools.filter(t => toolMatchesBackend(t, backendId)).length;
     }
     
     function getBackendPrefix(backendId) {
       // Get prefix dynamically from backend data
       const backend = backends.find(b => b.id === backendId);
       return backend?.toolPrefix || backendId;
+    }
+
+    function isFabricBackend(backend) {
+      const id = (backend?.id || '').toLowerCase();
+      const prefix = (backend?.toolPrefix || '').toLowerCase();
+      return id.includes('fabric') || prefix.includes('fabric');
+    }
+
+    // Central helper to decide whether a tool belongs to a backend.
+    // Prefers backendId from the API (exact), falls back to prefix matching.
+    function toolMatchesBackend(tool, backendId) {
+      if (tool.backendId) {
+        return tool.backendId === backendId;
+      }
+
+      const prefix = getBackendPrefix(backendId);
+      return tool.name.startsWith(prefix + '_') || (prefix === '' && !tool.name.includes('_'));
     }
     
     function filterByBackend(id) {
@@ -1772,10 +1943,8 @@ function getDashboardHTML(): string {
     }
     
     function getToolsForBackend(backendId) {
-      const prefix = getBackendPrefix(backendId);
-      // Include all tools for this backend, regardless of backend enabled status
       return tools.filter(t => {
-        const matchesBackend = t.name.startsWith(prefix + '_');
+        const matchesBackend = toolMatchesBackend(t, backendId);
         const matchesSearch = !searchQuery || 
           t.name.toLowerCase().includes(searchQuery.toLowerCase()) ||
           (t.description && t.description.toLowerCase().includes(searchQuery.toLowerCase()));
@@ -1865,6 +2034,16 @@ function getDashboardHTML(): string {
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                   </button>
                 </div>
+                \${isFabricBackend(backend) ? '<div class="backend-buttons" style="margin-right: 0.5rem;" onclick="event.stopPropagation();">' +
+                  '<button class="btn btn-secondary btn-small" onclick="event.stopPropagation(); triggerFabricCheck()">' +
+                  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><circle cx="12" cy="12" r="10"></circle><path d="M12 6v6l3 3"></path></svg>' +
+                  'Check Fabric Token' +
+                  '</button>' +
+                  '<button class="btn btn-secondary btn-small" onclick="event.stopPropagation(); triggerFabricLogin()">' +
+                  '<svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M12 1v22"></path><path d="M5 5h8a4 4 0 0 1 0 8H9a4 4 0 0 0 0 8h11"></path></svg>' +
+                  'Fabric Login' +
+                  '</button>' +
+                  '</div>' : ''}
                 <label class="toggle" onclick="event.stopPropagation()">
                   <input type="checkbox" \${backend.enabled ? 'checked' : ''}
                          onchange="toggleBackend('\${backend.id}', this.checked)">
@@ -1915,25 +2094,24 @@ function getDashboardHTML(): string {
         if (enabled) {
           const tool = tools.find(t => t.name === name);
           if (tool && tool.backendDisabled) {
-            // Find the backend ID from tool prefix dynamically
-            for (const backend of backends) {
-              const prefix = backend.toolPrefix + '_';
-              if (name.startsWith(prefix)) {
-                // Enable the backend first
-                await fetch('/dashboard/api/backends/' + encodeURIComponent(backend.id) + '/toggle', {
-                  method: 'POST',
-                  headers: { 'Content-Type': 'application/json' },
-                  body: JSON.stringify({ enabled: true })
-                });
-                backend.enabled = true;
-                // Clear backendDisabled flag for all tools of this backend
-                tools.forEach(t => {
-                  if (t.name.startsWith(prefix)) {
-                    t.backendDisabled = false;
-                  }
-                });
-                break;
-              }
+            // Prefer backendId from API; fall back to matching tools to backend
+            const backend = tool.backendId
+              ? backends.find(b => b.id === tool.backendId)
+              : backends.find(b => toolMatchesBackend(tool, b.id));
+
+            if (backend) {
+              await fetch('/dashboard/api/backends/' + encodeURIComponent(backend.id) + '/toggle', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ enabled: true })
+              });
+              backend.enabled = true;
+              // Clear backendDisabled flag for all tools of this backend
+              tools.forEach(t => {
+                if (toolMatchesBackend(t, backend.id)) {
+                  t.backendDisabled = false;
+                }
+              });
             }
           }
         }
@@ -1968,8 +2146,7 @@ function getDashboardHTML(): string {
         if (backend) backend.enabled = enabled;
         
         // Also update all tools for this backend via bulk API
-        const prefix = getBackendPrefix(id);
-        const backendTools = tools.filter(t => t.name.startsWith(prefix + '_')).map(t => t.name);
+        const backendTools = tools.filter(t => toolMatchesBackend(t, id)).map(t => t.name);
         
         if (backendTools.length > 0) {
           await fetch('/dashboard/api/tools/bulk', {
@@ -1980,7 +2157,7 @@ function getDashboardHTML(): string {
         }
         
         tools.forEach(t => {
-          if (t.name.startsWith(prefix + '_')) {
+          if (toolMatchesBackend(t, id)) {
             t.enabled = enabled;
           }
         });
@@ -1994,8 +2171,7 @@ function getDashboardHTML(): string {
     }
     
     async function toggleAllBackendTools(backendId, enabled) {
-      const prefix = getBackendPrefix(backendId);
-      const backendTools = tools.filter(t => t.name.startsWith(prefix + '_')).map(t => t.name);
+      const backendTools = tools.filter(t => toolMatchesBackend(t, backendId)).map(t => t.name);
 
       try {
         await fetch('/dashboard/api/tools/bulk', {
@@ -2089,6 +2265,47 @@ function getDashboardHTML(): string {
       setTimeout(() => {
         toast.classList.remove('show');
       }, 2500);
+    }
+
+    async function triggerFabricLogin() {
+      try {
+        showToast('Starting Fabric login...');
+        const res = await fetch('/dashboard/api/fabric/login', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+        const result = await res.json();
+        if (res.ok && result.success) {
+          showToast(result.message || 'Fabric login started');
+        } else {
+          showToast(result.error || 'Fabric login failed', true);
+        }
+      } catch (err) {
+        showToast('Fabric login failed', true);
+      }
+    }
+
+    async function triggerFabricCheck() {
+      try {
+        showToast('Checking Fabric token...');
+        const res = await fetch('/dashboard/api/fabric/check', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+        });
+
+        const result = await res.json();
+        if (res.ok && result.success) {
+          const status = result.workspaceProbe === 'ok' ? 'valid' : 'token ok, probe failed';
+          const expires = result.expiresOn ? 'exp: ' + result.expiresOn : 'exp unknown';
+          const detail = result.workspaceError ? ' (' + result.workspaceError + ')' : '';
+          showToast('Fabric token ' + status + ' · ' + expires + detail);
+        } else {
+          showToast(result.error || 'Fabric token check failed', true);
+        }
+      } catch (err) {
+        showToast('Fabric token check failed', true);
+      }
     }
 
     async function restartServer() {

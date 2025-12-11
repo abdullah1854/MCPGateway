@@ -13,6 +13,7 @@ import {
 } from '../types.js';
 import { BackendManager } from '../backend/index.js';
 import { logger } from '../logger.js';
+import { createGatewayTools, GatewayTool } from '../code-execution/gateway-tools.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
 
@@ -21,11 +22,26 @@ export class MCPProtocolHandler {
   private backendManager: BackendManager;
   private gatewayName: string;
   private gatewayVersion: string;
+  private gatewayTools: GatewayTool[];
+  private gatewayToolCall: (name: string, args: unknown) => Promise<unknown>;
+  private gatewayToolNames: Set<string>;
 
   constructor(backendManager: BackendManager, gatewayName = 'mcp-gateway', gatewayVersion = '1.0.0') {
     this.backendManager = backendManager;
     this.gatewayName = gatewayName;
     this.gatewayVersion = gatewayVersion;
+
+    // Initialize gateway tools for progressive disclosure
+    const { tools, callTool } = createGatewayTools(backendManager, {
+      prefix: 'gateway',
+      enableCodeExecution: true,
+      enableSkills: true,
+    });
+    this.gatewayTools = tools;
+    this.gatewayToolCall = callTool;
+    this.gatewayToolNames = new Set(tools.map(t => t.name));
+
+    logger.info(`Gateway tools initialized: ${tools.length} tools available`);
   }
 
   /**
@@ -221,13 +237,13 @@ export class MCPProtocolHandler {
       logger.debug('tools/list called before initialized notification');
     }
 
-    // Return only enabled tools to reduce token usage
-    const tools = this.backendManager.getEnabledTools();
-
+    // PROGRESSIVE DISCLOSURE: Only expose gateway meta-tools
+    // Backend tools are discovered via gateway_search_tools and called via gateway_call_tool_filtered
+    // This reduces token usage from 200k+ to ~10k for large tool collections
     return {
       jsonrpc: '2.0',
       id: request.id,
-      result: { tools },
+      result: { tools: this.gatewayTools },
     };
   }
 
@@ -254,6 +270,35 @@ export class MCPProtocolHandler {
 
     logger.info(`Calling tool: ${params.name}`, { sessionId: session.id });
 
+    // Check if this is a gateway tool
+    if (this.gatewayToolNames.has(params.name)) {
+      try {
+        const result = await this.gatewayToolCall(params.name, params.arguments ?? {});
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          result: {
+            content: [
+              {
+                type: 'text',
+                text: JSON.stringify(result, null, 2),
+              },
+            ],
+          },
+        };
+      } catch (error) {
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          error: {
+            code: MCPErrorCodes.InternalError,
+            message: error instanceof Error ? error.message : String(error),
+          },
+        };
+      }
+    }
+
+    // Route to backend
     const response = await this.backendManager.callTool(params.name, params.arguments ?? {});
 
     // Return the response with the original request ID

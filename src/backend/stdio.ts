@@ -16,6 +16,8 @@ export class StdioBackend extends BaseBackend {
     reject: (error: Error) => void;
     timeout: NodeJS.Timeout;
   }>();
+  private connectionError: Error | null = null; // Track connection-specific errors
+  private stderrBuffer: string[] = []; // Buffer stderr during connection for better error messages
 
   // Stderr throttling to prevent log spam
   private stderrCount = 0;
@@ -70,12 +72,39 @@ export class StdioBackend extends BaseBackend {
 
       // Handle stderr with throttling to prevent log spam
       this.process.stderr?.on('data', (data) => {
-        this.logStderrThrottled(data.toString().trim());
+        const message = data.toString().trim();
+        
+        // Buffer stderr during connection for better error messages
+        if (this._status === 'connecting') {
+          this.stderrBuffer.push(message);
+          // Keep only last 10 lines to avoid excessive memory
+          if (this.stderrBuffer.length > 10) {
+            this.stderrBuffer.shift();
+          }
+        }
+        
+        this.logStderrThrottled(message);
       });
 
       // Handle process exit
       this.process.on('exit', (code, signal) => {
         logger.info(`Backend ${this.id} process exited`, { code, signal });
+        
+        // If we're still connecting, this is a connection failure
+        if (this._status === 'connecting') {
+          let exitMessage = code !== null 
+            ? `Process exited with code ${code}`
+            : `Process exited due to signal ${signal}`;
+          
+          // Include stderr output if available for better diagnostics
+          if (this.stderrBuffer.length > 0) {
+            const stderrPreview = this.stderrBuffer.slice(-3).join('; '); // Last 3 lines
+            exitMessage += `. Error output: ${stderrPreview}`;
+          }
+          
+          this.connectionError = new Error(exitMessage);
+        }
+        
         this.cleanup();
         this.setStatus('disconnected');
       });
@@ -83,6 +112,12 @@ export class StdioBackend extends BaseBackend {
       // Handle process errors
       this.process.on('error', (error) => {
         logger.error(`Backend ${this.id} process error`, { error: error.message });
+        
+        // If we're still connecting, track this as a connection error
+        if (this._status === 'connecting') {
+          this.connectionError = new Error(`Failed to start process: ${error.message}`);
+        }
+        
         this.setError(error);
         this.cleanup();
       });
@@ -99,8 +134,21 @@ export class StdioBackend extends BaseBackend {
 
       this.setStatus('connected');
       logger.info(`Backend ${this.id} connected successfully`);
+      
+      // Clear stderr buffer on successful connection
+      this.stderrBuffer = [];
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
+      
+      // If we have a connection error, use that instead
+      if (this.connectionError) {
+        const connectionErr = this.connectionError;
+        this.connectionError = null; // Reset after using
+        this.setError(connectionErr);
+        this.cleanup();
+        throw connectionErr;
+      }
+      
       this.setError(err);
       this.cleanup();
       throw err;
@@ -118,12 +166,20 @@ export class StdioBackend extends BaseBackend {
   }
 
   private async cleanup(): Promise<void> {
-    // Reject all pending requests
+    // Reject all pending requests with a more specific error if available
+    const errorMessage = this.connectionError 
+      ? this.connectionError.message 
+      : 'Backend disconnected';
+    
     for (const [, pending] of this.pendingRequests) {
       clearTimeout(pending.timeout);
-      pending.reject(new Error('Backend disconnected'));
+      pending.reject(new Error(errorMessage));
     }
     this.pendingRequests.clear();
+    
+    // Reset connection error and stderr buffer after cleanup
+    this.connectionError = null;
+    this.stderrBuffer = [];
 
     // Close readline
     if (this.readline) {
