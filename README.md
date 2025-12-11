@@ -9,6 +9,24 @@ A universal Model Context Protocol (MCP) Gateway that aggregates multiple MCP se
 
 ![MCP Gateway Architecture](screenshots/MCPGateway.jpg)
 
+## Why MCP Gateway?
+
+**Problem:** AI agents connecting to multiple MCP servers face tool overload. Loading 300+ tool definitions upfront consumes massive context tokens.
+
+**Solution:** MCP Gateway aggregates all your MCP servers and exposes them through just **14 gateway tools** that enable smart, on-demand tool discovery.
+
+### 305 Tools Through 14 Gateway Tools
+
+![Cursor showing 14 gateway tools providing access to 305 MCP tools](screenshots/gateway-tools-claude-desktop.png)
+
+*Cursor connected to MCP Gateway - 14 tools provide access to 305 backend tools across 16 servers*
+
+### Minimal Context Usage
+
+![Claude Code context showing only 8.9k tokens for MCP tools](screenshots/context-usage-claude-code.jpg)
+
+*Claude Code `/context` view - Only 8.9k tokens (4.5%) for all MCP tools instead of 200k+ for raw definitions*
+
 ## What's New (v1.0.0)
 
 - **Gateway MCP Tools** - All code execution features now exposed as MCP tools (`gateway_*`) that any client can discover and use directly
