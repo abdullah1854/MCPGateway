@@ -9,30 +9,48 @@ A universal Model Context Protocol (MCP) Gateway that aggregates multiple MCP se
 
 ![MCP Gateway Architecture](screenshots/MCPGateway.jpg)
 
+## What's New (v1.0.0)
+
+- **Gateway MCP Tools** - All code execution features now exposed as MCP tools (`gateway_*`) that any client can discover and use directly
+- **Hot-Reload Server Management** - Add, edit, and delete MCP servers from the dashboard without restarting
+- **UI State Persistence** - Disabled tools and backends are remembered across server restarts
+- **Enhanced Dashboard** - Reconnect failed backends, view real-time status, improved error handling
+- **Connection Testing** - Test server connections before adding them to your configuration
+- **Export/Import Config** - Backup and share your server configurations easily
+- **Parallel Tool Execution** - Execute multiple tool calls simultaneously for better performance
+- **Result Filtering & Aggregation** - Reduce context bloat with `maxRows`, `fields`, `format`, and aggregation options
+
 ## Features
 
-### Core Features
+### Core Gateway Features
 - 🔀 **Multi-Server Aggregation** - Route multiple MCP servers through one gateway
 - 🎛️ **Web Dashboard** - Real-time UI to manage tools, backends, and server lifecycle
+- ➕ **Hot-Reload Server Management** - Add, edit, delete MCP servers from dashboard without restart
 - 🌐 **HTTP Streamable Transport** - Primary transport, works with all clients
 - 📡 **SSE Transport** - Backward compatibility for older clients
-- 🔐 **Authentication** - API Key and OAuth support
+- 🔐 **Authentication** - API Key and OAuth/JWT support
 - ⚡ **Rate Limiting** - Protect your backend servers
 - 🐳 **Docker Ready** - Easy deployment with Docker/Compose
-- 📊 **Health Checks** - Monitor backend status
+- 📊 **Health Checks** - Monitor backend status with detailed diagnostics
 - 🔄 **Auto-Restart** - Server restarts automatically on crash or via dashboard
+- 💾 **UI State Persistence** - Remembers disabled tools/backends across restarts
 
-### Advanced Features (Code Execution Mode)
-Inspired by [Anthropic's Code Execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp):
+### Code Execution Mode (Token-Efficient AI)
+Inspired by [Anthropic's Code Execution with MCP](https://www.anthropic.com/engineering/code-execution-with-mcp) - achieve up to **98.7% token reduction**:
 
 - 🔍 **Progressive Tool Disclosure** - Search and lazy-load tools to reduce token usage
-- 💻 **Code Execution** - Execute TypeScript/JavaScript code in a sandboxed environment
+- 💻 **Sandboxed Code Execution** - Execute TypeScript/JavaScript in secure Node.js VM
 - 📉 **Context-Efficient Results** - Filter, aggregate, and transform tool results
 - 🔒 **Privacy-Preserving Operations** - PII tokenization for sensitive data
 - 📁 **Skills System** - Save and reuse successful code patterns
 - 🗄️ **State Persistence** - Workspace for agent state across sessions
-- 📈 **Metrics & Monitoring** - Prometheus-format metrics for observability
+- 🛠️ **Gateway MCP Tools** - All code execution features exposed as MCP tools for any client
+
+### Monitoring & Observability
+- 📈 **Prometheus Metrics** - Tool call latency, error rates, cache performance
+- 📊 **JSON Metrics API** - Programmatic access to gateway statistics
 - 💾 **Result Caching** - LRU cache with TTL for tool results
+- 📝 **Audit Logging** - Track sensitive operations
 
 ## Screenshots
 
@@ -148,21 +166,34 @@ For secure usage, prefer:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
+| `/dashboard/api/tools` | GET | Get all tools with enabled status |
+| `/dashboard/api/backends` | GET | Get all backends with status |
+| `/dashboard/api/tools/:name/toggle` | POST | Toggle tool enabled/disabled |
+| `/dashboard/api/backends/:id/toggle` | POST | Toggle backend enabled/disabled |
+| `/dashboard/api/backends/:id/reconnect` | POST | Reconnect a failed backend |
+| `/dashboard/api/backends` | POST | Add new backend server |
+| `/dashboard/api/backends/:id` | PUT | Update backend configuration |
+| `/dashboard/api/backends/:id` | DELETE | Remove backend server |
 | `/dashboard/api/config/export` | GET | Export server configuration |
 | `/dashboard/api/config/import` | POST | Import server configuration |
+| `/dashboard/api/restart` | POST | Restart the gateway server |
 
 ## Dashboard
 
 Access the web dashboard at `http://localhost:3010/dashboard` to:
 
-- View all connected backends and their status
-- **Add new MCP servers** with connection testing
-- **Edit existing servers** (modify command, args, env vars)
+- View all connected backends and their real-time status
+- **Add new MCP servers** with connection testing (STDIO, HTTP, SSE transports)
+- **Edit existing servers** (modify command, args, environment variables)
 - **Delete servers** with graceful disconnect
 - Enable/disable individual tools or entire backends
-- Search and filter tools
+- Search and filter tools across all backends
 - **Export/import configuration** for backup and sharing
-- Restart the gateway server
+- **Reconnect failed backends** with one click
+- Restart the entire gateway server
+- View tool counts and backend health at a glance
+
+The dashboard persists UI state (disabled tools/backends) across server restarts.
 
 ## Client Configuration
 
@@ -453,6 +484,27 @@ Response:
 
 The Code Execution Mode allows AI agents to write and execute code instead of making individual tool calls, achieving up to **98.7% token reduction** for complex workflows.
 
+### Gateway MCP Tools
+
+All code execution features are exposed as MCP tools that any client can use directly. When connected to the gateway, clients automatically get these tools:
+
+| Tool | Description |
+|------|-------------|
+| `gateway_list_tool_names` | Get all tool names (minimal tokens) |
+| `gateway_search_tools` | Search tools by name, description, or backend |
+| `gateway_get_tool_schema` | Lazy-load specific tool schema |
+| `gateway_get_tool_tree` | Get tools organized by backend |
+| `gateway_get_tool_stats` | Get statistics about tools |
+| `gateway_execute_code` | Execute TypeScript/JavaScript in sandbox |
+| `gateway_call_tool_filtered` | Call any tool with result filtering |
+| `gateway_call_tool_aggregate` | Call tool with aggregation (count, sum, avg, etc.) |
+| `gateway_call_tools_parallel` | Execute multiple tools in parallel |
+| `gateway_list_skills` | List saved code patterns |
+| `gateway_search_skills` | Search skills by name/tags |
+| `gateway_get_skill` | Get skill details and code |
+| `gateway_execute_skill` | Execute a saved skill |
+| `gateway_create_skill` | Save a new reusable skill |
+
 ### Progressive Tool Disclosure
 
 Instead of loading all tool definitions upfront (which can consume excessive tokens with 300+ tools), use progressive disclosure:
@@ -631,6 +683,71 @@ curl http://localhost:3010/api/code/cache/stats
 
 # Clear cache
 curl -X POST http://localhost:3010/api/code/cache/clear
+```
+
+## Tips for AI Agents
+
+When using MCP Gateway with AI agents (Claude, GPT, etc.), follow these best practices for efficient token usage:
+
+### 1. Start with Tool Discovery
+```javascript
+// First, get just tool names (minimal tokens)
+const names = await gateway_list_tool_names();
+
+// Search for specific functionality
+const dbTools = await gateway_search_tools({ query: "database", detailLevel: "name_description" });
+
+// Only load full schema when you need to call a tool
+const schema = await gateway_get_tool_schema({ toolName: "mssql_execute_query" });
+```
+
+### 2. Use Code Execution for Complex Workflows
+```javascript
+// Instead of multiple tool calls, batch operations in code
+await gateway_execute_code({
+  code: `
+    const users = await mssql.executeQuery({ query: "SELECT * FROM users WHERE active = 1" });
+    const summary = users.reduce((acc, u) => {
+      acc[u.department] = (acc[u.department] || 0) + 1;
+      return acc;
+    }, {});
+    console.log(JSON.stringify(summary));
+  `
+});
+```
+
+### 3. Filter Large Results
+```javascript
+// Reduce context bloat from large datasets
+await gateway_call_tool_filtered({
+  toolName: "mssql_get_table_data",
+  args: { tableName: "orders" },
+  filter: { maxRows: 10, fields: ["id", "status", "total"], format: "summary" }
+});
+```
+
+### 4. Use Aggregations
+```javascript
+// Get summaries instead of raw data
+await gateway_call_tool_aggregate({
+  toolName: "mssql_get_table_data",
+  args: { tableName: "orders" },
+  aggregation: { operation: "groupBy", groupByField: "status" }
+});
+```
+
+### 5. Save Reusable Patterns as Skills
+```javascript
+// Create a skill for common operations
+await gateway_create_skill({
+  name: "daily-sales-report",
+  description: "Generate daily sales summary",
+  code: "const sales = await mssql.executeQuery({...}); console.log(sales);",
+  tags: ["reporting", "sales"]
+});
+
+// Execute later with different inputs
+await gateway_execute_skill({ name: "daily-sales-report", inputs: { date: "2024-01-15" } });
 ```
 
 ## macOS Auto-Start (LaunchAgent)
