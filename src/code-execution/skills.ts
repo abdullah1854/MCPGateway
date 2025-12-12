@@ -176,7 +176,8 @@ export class SkillsManager {
    */
   async executeSkill(
     name: string,
-    inputs: Record<string, unknown> = {}
+    inputs: Record<string, unknown> = {},
+    options?: { sessionId?: string }
   ): Promise<SkillExecutionResult> {
     const skill = this.getSkill(name);
 
@@ -210,6 +211,7 @@ export class SkillsManager {
     // Execute the skill code with inputs as context
     const result = await this.executor.execute(skill.code, {
       context: { inputs, ...inputs },
+      sessionId: options?.sessionId,
     });
 
     return {

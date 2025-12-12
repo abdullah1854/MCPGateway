@@ -12,6 +12,7 @@ import { CodeExecutor } from './executor.js';
 import { SkillsManager } from './skills.js';
 import { WorkspaceManager } from './workspace.js';
 import { Aggregations } from './streaming.js';
+import { getPIITokenizerForSession } from './pii-tokenizer.js';
 
 /**
  * Estimate tokens for a given object (roughly 4 chars per token)
@@ -47,6 +48,7 @@ export interface GatewayTool {
     properties: Record<string, unknown>;
     required?: string[];
   };
+  inputExamples?: Record<string, unknown>[];
 }
 
 export interface GatewayToolsConfig {
@@ -61,7 +63,7 @@ export interface GatewayToolsConfig {
 export function createGatewayTools(
   backendManager: BackendManager,
   config: GatewayToolsConfig = {}
-): { tools: GatewayTool[]; callTool: (name: string, args: unknown) => Promise<unknown> } {
+): { tools: GatewayTool[]; callTool: (name: string, args: unknown, ctx?: { sessionId?: string }) => Promise<unknown> } {
   const prefix = config.prefix ?? 'gateway';
   const enableCodeExecution = config.enableCodeExecution ?? true;
   const enableSkills = config.enableSkills ?? true;
@@ -72,6 +74,23 @@ export function createGatewayTools(
   const skillsManager = new SkillsManager(workspaceManager, codeExecutor);
 
   const tools: GatewayTool[] = [];
+
+  const requireAllowlist = process.env.CODE_EXECUTION_REQUIRE_ALLOWLIST === '1';
+  const allowedTools = (process.env.CODE_EXECUTION_ALLOWED_TOOLS ?? '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+  const allowedPrefixes = (process.env.CODE_EXECUTION_ALLOWED_TOOL_PREFIXES ?? '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+  const enforceToolAllowlist = requireAllowlist || allowedTools.length > 0 || allowedPrefixes.length > 0;
+  const allowedToolNames = new Set(allowedTools);
+  const isProgrammaticToolAllowed = (toolName: string): boolean => {
+    if (!enforceToolAllowlist) return true;
+    if (allowedToolNames.has(toolName)) return true;
+    return allowedPrefixes.some(p => toolName.startsWith(p));
+  };
 
   // ==================== Tool Discovery Tools ====================
 
@@ -102,6 +121,10 @@ export function createGatewayTools(
         },
       },
     },
+    inputExamples: [
+      { backend: 'mssql-prod', prefix: 'mssql_prod_', limit: 50, offset: 0 },
+      { prefix: 'github_', limit: 200, offset: 0 },
+    ],
   });
 
   tools.push({
@@ -141,6 +164,10 @@ export function createGatewayTools(
         },
       },
     },
+    inputExamples: [
+      { query: 'sql', detailLevel: 'name_description', limit: 20 },
+      { backend: 'mssql-prod', category: 'database', detailLevel: 'name_only', limit: 50 },
+    ],
   });
 
   tools.push({
@@ -161,6 +188,10 @@ export function createGatewayTools(
       },
       required: ['toolName'],
     },
+    inputExamples: [
+      { toolName: 'mssql_prod_execute_query', compact: true },
+      { toolName: 'filesystem_read_file', compact: false },
+    ],
   });
 
   tools.push({
@@ -182,6 +213,9 @@ export function createGatewayTools(
       },
       required: ['toolNames'],
     },
+    inputExamples: [
+      { toolNames: ['mssql_prod_execute_query', 'mssql_prod_get_schema'], compact: true },
+    ],
   });
 
   tools.push({
@@ -191,6 +225,9 @@ export function createGatewayTools(
       type: 'object',
       properties: {},
     },
+    inputExamples: [
+      {},
+    ],
   });
 
   tools.push({
@@ -200,6 +237,9 @@ export function createGatewayTools(
       type: 'object',
       properties: {},
     },
+    inputExamples: [
+      {},
+    ],
   });
 
   tools.push({
@@ -209,6 +249,9 @@ export function createGatewayTools(
       type: 'object',
       properties: {},
     },
+    inputExamples: [
+      {},
+    ],
   });
 
   // ==================== Code Execution Tools ====================
@@ -236,6 +279,12 @@ export function createGatewayTools(
         },
         required: ['code'],
       },
+      inputExamples: [
+        {
+          code: "const r = await callTool('gateway_search_tools', { query: 'sql', limit: 5 });\nconsole.log(r);",
+          timeout: 30000,
+        },
+      ],
     });
 
     tools.push({
@@ -284,6 +333,14 @@ export function createGatewayTools(
         },
         required: ['toolName'],
       },
+      inputExamples: [
+        {
+          toolName: 'database_execute_query',
+          args: { query: "SELECT TOP 5 * FROM inventory.products WHERE status = 'active'" },
+          filter: { format: 'summary', maxRows: 5 },
+          smart: true,
+        },
+      ],
     });
 
     tools.push({
@@ -323,6 +380,13 @@ export function createGatewayTools(
         },
         required: ['toolName', 'aggregation'],
       },
+      inputExamples: [
+        {
+          toolName: 'database_execute_query',
+          args: { query: "SELECT status, COUNT(*) as cnt FROM orders GROUP BY status" },
+          aggregation: { operation: 'groupBy', groupByField: 'status' },
+        },
+      ],
     });
 
     tools.push({
@@ -361,6 +425,14 @@ export function createGatewayTools(
         },
         required: ['calls'],
       },
+      inputExamples: [
+        {
+          calls: [
+            { toolName: 'gateway_search_tools', args: { query: 'mssql', limit: 5 }, smart: true },
+            { toolName: 'gateway_get_tool_stats', args: {} },
+          ],
+        },
+      ],
     });
   }
 
@@ -374,6 +446,9 @@ export function createGatewayTools(
         type: 'object',
         properties: {},
       },
+      inputExamples: [
+        {},
+      ],
     });
 
     tools.push({
@@ -389,6 +464,9 @@ export function createGatewayTools(
         },
         required: ['query'],
       },
+      inputExamples: [
+        { query: 'sql' },
+      ],
     });
 
     tools.push({
@@ -404,6 +482,9 @@ export function createGatewayTools(
         },
         required: ['name'],
       },
+      inputExamples: [
+        { name: 'my-skill' },
+      ],
     });
 
     tools.push({
@@ -423,6 +504,9 @@ export function createGatewayTools(
         },
         required: ['name'],
       },
+      inputExamples: [
+        { name: 'my-skill', inputs: { limit: 5 } },
+      ],
     });
 
     tools.push({
@@ -464,13 +548,30 @@ export function createGatewayTools(
         },
         required: ['name', 'description', 'code'],
       },
+      inputExamples: [
+        {
+          name: 'list-recent-orders',
+          description: 'Fetch recent orders and print a summary',
+          code: "const r = await callTool('database_query', { query: \"SELECT TOP 5 id, status FROM orders ORDER BY created_at DESC\" });\nconsole.log(r);",
+          inputs: [{ name: 'limit', type: 'number', description: 'Max rows to fetch', required: false }],
+          tags: ['database', 'query'],
+        },
+        {
+          name: 'hello-world',
+          description: 'A simple greeting skill',
+          code: "console.log('Hello, ' + (inputs.name || 'World') + '!');",
+          inputs: [{ name: 'name', type: 'string', description: 'Name to greet' }],
+          tags: ['example'],
+        },
+      ],
     });
   }
 
   // ==================== Tool Call Handler ====================
 
-  async function callTool(name: string, args: unknown): Promise<unknown> {
+  async function callTool(name: string, args: unknown, ctx?: { sessionId?: string }): Promise<unknown> {
     const params = (args || {}) as Record<string, unknown>;
+    const tokenizer = getPIITokenizerForSession(ctx?.sessionId);
 
     // Tool Discovery
     if (name === `${prefix}_list_tool_names`) {
@@ -566,14 +667,19 @@ export function createGatewayTools(
         timeout,
         context,
         captureConsole: true,
+        sessionId: ctx?.sessionId,
       });
     }
 
     if (name === `${prefix}_call_tool_filtered` && enableCodeExecution) {
       const toolName = params.toolName as string;
-      const toolArgs = params.args || {};
+      const toolArgs = tokenizer ? tokenizer.detokenizeObject(params.args || {}) : (params.args || {});
       const filter = params.filter as { maxRows?: number; fields?: string[]; format?: string } | undefined;
       const smart = params.smart as boolean | undefined;
+
+      if (!isProgrammaticToolAllowed(toolName)) {
+        return { success: false, error: `Tool not allowed for programmatic calls: ${toolName}` };
+      }
 
       const response = await backendManager.callTool(toolName, toolArgs);
       if (response.error) {
@@ -587,17 +693,25 @@ export function createGatewayTools(
         result = applyResultFilter(result, effectiveFilter);
       }
 
+      if (tokenizer) {
+        result = tokenizer.tokenizeObject(result).result;
+      }
+
       return { success: true, result };
     }
 
     if (name === `${prefix}_call_tool_aggregate` && enableCodeExecution) {
       const toolName = params.toolName as string;
-      const toolArgs = params.args || {};
+      const toolArgs = tokenizer ? tokenizer.detokenizeObject(params.args || {}) : (params.args || {});
       const aggregation = params.aggregation as {
         operation: string;
         field?: string;
         groupByField?: string;
       };
+
+      if (!isProgrammaticToolAllowed(toolName)) {
+        return { success: false, error: `Tool not allowed for programmatic calls: ${toolName}` };
+      }
 
       const response = await backendManager.callTool(toolName, toolArgs);
       if (response.error) {
@@ -633,7 +747,11 @@ export function createGatewayTools(
           aggregated = data;
       }
 
-      return { success: true, result: aggregated, operation: aggregation.operation };
+      const safeAggregated = tokenizer
+        ? tokenizer.tokenizeObject(aggregated).result
+        : aggregated;
+
+      return { success: true, result: safeAggregated, operation: aggregation.operation };
     }
 
     if (name === `${prefix}_call_tools_parallel` && enableCodeExecution) {
@@ -644,8 +762,17 @@ export function createGatewayTools(
         smart?: boolean;
       }>;
 
+      for (const c of calls) {
+        if (!isProgrammaticToolAllowed(c.toolName)) {
+          return { success: false, error: `Tool not allowed for programmatic calls: ${c.toolName}` };
+        }
+      }
+
       // Ensure args is always present for type compatibility
-      const normalizedCalls = calls.map(c => ({ toolName: c.toolName, args: c.args ?? {} }));
+      const normalizedCalls = calls.map(c => ({
+        toolName: c.toolName,
+        args: tokenizer ? tokenizer.detokenizeObject(c.args ?? {}) : (c.args ?? {}),
+      }));
       const results = await backendManager.callToolsParallel(normalizedCalls);
 
       return {
@@ -657,6 +784,10 @@ export function createGatewayTools(
 
           if (effectiveFilter) {
             result = applyResultFilter(result, effectiveFilter);
+          }
+
+          if (tokenizer) {
+            result = tokenizer.tokenizeObject(result).result;
           }
 
           return {
@@ -692,7 +823,7 @@ export function createGatewayTools(
     if (name === `${prefix}_execute_skill` && enableSkills) {
       const skillName = params.name as string;
       const inputs = params.inputs as Record<string, unknown> || {};
-      return await skillsManager.executeSkill(skillName, inputs);
+      return await skillsManager.executeSkill(skillName, inputs, { sessionId: ctx?.sessionId });
     }
 
     if (name === `${prefix}_create_skill` && enableSkills) {

@@ -14,8 +14,28 @@ import {
 import { BackendManager } from '../backend/index.js';
 import { logger } from '../logger.js';
 import { createGatewayTools, GatewayTool } from '../code-execution/gateway-tools.js';
+import { getPIITokenizerForSession, clearPIITokenizerForSession } from '../code-execution/pii-tokenizer.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
+
+// Allowlist configuration for direct MCP tool calls (non-gateway tools)
+const requireAllowlist = process.env.CODE_EXECUTION_REQUIRE_ALLOWLIST === '1';
+const allowedTools = (process.env.CODE_EXECUTION_ALLOWED_TOOLS ?? '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+const allowedPrefixes = (process.env.CODE_EXECUTION_ALLOWED_TOOL_PREFIXES ?? '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+const enforceToolAllowlist = requireAllowlist || allowedTools.length > 0 || allowedPrefixes.length > 0;
+const allowedToolNames = new Set(allowedTools);
+
+function isToolAllowed(toolName: string): boolean {
+  if (!enforceToolAllowlist) return true;
+  if (allowedToolNames.has(toolName)) return true;
+  return allowedPrefixes.some(p => toolName.startsWith(p));
+}
 
 export class MCPProtocolHandler {
   private sessions = new Map<string, GatewaySession>();
@@ -23,7 +43,7 @@ export class MCPProtocolHandler {
   private gatewayName: string;
   private gatewayVersion: string;
   private gatewayTools: GatewayTool[];
-  private gatewayToolCall: (name: string, args: unknown) => Promise<unknown>;
+  private gatewayToolCall: (name: string, args: unknown, ctx?: { sessionId?: string }) => Promise<unknown>;
   private gatewayToolNames: Set<string>;
 
   constructor(backendManager: BackendManager, gatewayName = 'mcp-gateway', gatewayVersion = '1.0.0') {
@@ -273,7 +293,7 @@ export class MCPProtocolHandler {
     // Check if this is a gateway tool
     if (this.gatewayToolNames.has(params.name)) {
       try {
-        const result = await this.gatewayToolCall(params.name, params.arguments ?? {});
+        const result = await this.gatewayToolCall(params.name, params.arguments ?? {}, { sessionId: session.id });
         return {
           jsonrpc: '2.0',
           id: request.id,
@@ -298,8 +318,32 @@ export class MCPProtocolHandler {
       }
     }
 
-    // Route to backend
-    const response = await this.backendManager.callTool(params.name, params.arguments ?? {});
+    // Route to backend - apply allowlist and PII checks
+    if (!isToolAllowed(params.name)) {
+      return {
+        jsonrpc: '2.0',
+        id: request.id,
+        error: {
+          code: MCPErrorCodes.InvalidRequest,
+          message: `Tool not allowed: ${params.name}`,
+        },
+      };
+    }
+
+    // Get session-scoped PII tokenizer
+    const tokenizer = getPIITokenizerForSession(session.id);
+
+    // Detokenize inbound arguments (in case they contain PII tokens from previous tool results)
+    const detokenizedArgs = tokenizer
+      ? tokenizer.detokenizeObject(params.arguments ?? {})
+      : (params.arguments ?? {});
+
+    const response = await this.backendManager.callTool(params.name, detokenizedArgs);
+
+    // Tokenize outbound results to protect PII from entering model context
+    if (response.result && tokenizer) {
+      response.result = tokenizer.tokenizeObject(response.result).result;
+    }
 
     // Return the response with the original request ID
     return {
@@ -416,6 +460,8 @@ export class MCPProtocolHandler {
     for (const [id, session] of this.sessions) {
       if (now - session.lastActivityAt.getTime() > maxAgeMs) {
         this.sessions.delete(id);
+        // Also clean up session-scoped PII tokenizer to prevent memory leak
+        clearPIITokenizerForSession(id);
         cleaned++;
       }
     }

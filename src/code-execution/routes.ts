@@ -18,7 +18,30 @@ import { Aggregations } from './streaming.js';
 import { WorkspaceManager } from './workspace.js';
 import { SkillsManager } from './skills.js';
 import { ResultCache } from './cache.js';
+import { getPIITokenizerForSession } from './pii-tokenizer.js';
 import { z } from 'zod';
+
+const requireAllowlist = process.env.CODE_EXECUTION_REQUIRE_ALLOWLIST === '1';
+const allowedTools = (process.env.CODE_EXECUTION_ALLOWED_TOOLS ?? '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+const allowedPrefixes = (process.env.CODE_EXECUTION_ALLOWED_TOOL_PREFIXES ?? '')
+  .split(',')
+  .map(s => s.trim())
+  .filter(Boolean);
+const enforceToolAllowlist = requireAllowlist || allowedTools.length > 0 || allowedPrefixes.length > 0;
+const allowedToolNames = new Set(allowedTools);
+
+function isProgrammaticToolAllowed(toolName: string): boolean {
+  if (!enforceToolAllowlist) return true;
+  if (allowedToolNames.has(toolName)) return true;
+  return allowedPrefixes.some(p => toolName.startsWith(p));
+}
+
+function getSessionId(req: Request): string | undefined {
+  return (req.headers['mcp-session-id'] as string) || (req.headers['x-session-id'] as string);
+}
 
 // Request validation schemas
 const SearchToolsSchema = z.object({
@@ -273,10 +296,13 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
 
       const { code, timeout, context } = parseResult.data;
 
+      const sessionId = getSessionId(req);
+
       const result = await codeExecutor.execute(code, {
         timeout,
         context,
         captureConsole: true,
+        sessionId,
       });
 
       res.json(result);
@@ -319,8 +345,19 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
         }
       }
 
+      if (!isProgrammaticToolAllowed(name)) {
+        res.status(403).json({
+          success: false,
+          error: `Tool not allowed for programmatic calls: ${name}`,
+        });
+        return;
+      }
+
+      const tokenizer = getPIITokenizerForSession(getSessionId(req));
+      const detokenizedArgs = tokenizer ? tokenizer.detokenizeObject(args) : args;
+
       // Call the tool
-      const response = await backendManager.callTool(name, args);
+      const response = await backendManager.callTool(name, detokenizedArgs);
 
       if (response.error) {
         res.status(400).json({
@@ -337,6 +374,10 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
         ((smart as boolean | undefined) !== false ? { maxRows: 20, format: 'summary' } : undefined);
       if (effectiveFilter) {
         result = applyResultFilter(result, effectiveFilter);
+      }
+
+      if (tokenizer) {
+        result = tokenizer.tokenizeObject(result).result;
       }
 
       res.json({
@@ -361,6 +402,17 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
       const { name } = req.params;
       const { args = {}, aggregation } = req.body;
 
+      if (!isProgrammaticToolAllowed(name)) {
+        res.status(403).json({
+          success: false,
+          error: `Tool not allowed for programmatic calls: ${name}`,
+        });
+        return;
+      }
+
+      const tokenizer = getPIITokenizerForSession(getSessionId(req));
+      const detokenizedArgs = tokenizer ? tokenizer.detokenizeObject(args) : args;
+
       // Validate aggregation
       const aggResult = AggregationSchema.safeParse(aggregation);
       if (!aggResult.success) {
@@ -372,7 +424,7 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
       }
 
       // Call the tool
-      const response = await backendManager.callTool(name, args);
+      const response = await backendManager.callTool(name, detokenizedArgs);
 
       if (response.error) {
         res.status(400).json({
@@ -415,7 +467,7 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
 
       res.json({
         success: true,
-        result: aggregated,
+        result: tokenizer ? tokenizer.tokenizeObject(aggregated).result : aggregated,
         operation,
       });
     } catch (error) {
@@ -442,13 +494,28 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
         return;
       }
 
-      const results = await backendManager.callToolsParallel(calls);
+      for (const c of calls) {
+        if (!isProgrammaticToolAllowed(c.toolName)) {
+          res.status(403).json({
+            success: false,
+            error: `Tool not allowed for programmatic calls: ${c.toolName}`,
+          });
+          return;
+        }
+      }
+
+      const tokenizer = getPIITokenizerForSession(getSessionId(req));
+      const detokenizedCalls = tokenizer
+        ? calls.map(c => ({ toolName: c.toolName, args: tokenizer.detokenizeObject(c.args) }))
+        : calls;
+
+      const results = await backendManager.callToolsParallel(detokenizedCalls);
 
       res.json({
         success: true,
         results: results.map((r, i) => ({
-          toolName: calls[i].toolName,
-          result: r.result,
+          toolName: detokenizedCalls[i].toolName,
+          result: tokenizer ? tokenizer.tokenizeObject(r.result).result : r.result,
           error: r.error?.message,
         })),
       });
@@ -553,7 +620,7 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
       const { name } = req.params;
       const { inputs = {} } = req.body;
 
-      const result = await skillsManager.executeSkill(name, inputs);
+      const result = await skillsManager.executeSkill(name, inputs, { sessionId: getSessionId(req) });
       res.json(result);
     } catch (error) {
       res.status(500).json({

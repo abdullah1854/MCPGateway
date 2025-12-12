@@ -311,3 +311,29 @@ export class DataFlowManager {
     return data;
   }
 }
+
+const _piiSessionTokenizers = new Map<string, PIITokenizer>();
+const _piiEnabled = (process.env.PII_TOKENIZATION_ENABLED ?? '1') !== '0';
+const _piiEnabledTypes = (() => {
+  const raw = (process.env.PII_TOKENIZATION_TYPES ?? '')
+    .split(',')
+    .map(s => s.trim())
+    .filter(Boolean);
+  return raw.length > 0 ? (raw as PIIType[]) : undefined;
+})();
+
+export function getPIITokenizerForSession(sessionId: string | undefined): PIITokenizer | null {
+  if (!_piiEnabled) return null;
+  if (!sessionId) return null;
+
+  const existing = _piiSessionTokenizers.get(sessionId);
+  if (existing) return existing;
+
+  const tokenizer = new PIITokenizer({ enabledTypes: _piiEnabledTypes });
+  _piiSessionTokenizers.set(sessionId, tokenizer);
+  return tokenizer;
+}
+
+export function clearPIITokenizerForSession(sessionId: string): void {
+  _piiSessionTokenizers.delete(sessionId);
+}

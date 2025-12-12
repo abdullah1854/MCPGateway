@@ -18,6 +18,7 @@
 import { BackendManager } from '../backend/index.js';
 import { MCPResponse } from '../types.js';
 import { logger } from '../logger.js';
+import { PIITokenizer, getPIITokenizerForSession } from './pii-tokenizer.js';
 import * as vm from 'vm';
 
 /**
@@ -86,6 +87,8 @@ export interface ExecutionOptions {
   prettyConsole?: boolean;
   /** Context variables to inject */
   context?: Record<string, unknown>;
+  /** Session ID to scope stateful features like PII tokenization */
+  sessionId?: string;
 }
 
 export interface ExecutionResult {
@@ -110,8 +113,48 @@ export class CodeExecutor {
   private defaultTimeout = 30000; // 30 seconds
   private maxOutputSize = 1024 * 100; // 100KB max output
 
+  private enforceToolAllowlist: boolean;
+  private allowedToolNames: Set<string>;
+  private allowedToolPrefixes: string[];
+
   constructor(backendManager: BackendManager) {
     this.backendManager = backendManager;
+
+    const requireAllowlist = process.env.CODE_EXECUTION_REQUIRE_ALLOWLIST === '1';
+    const allowedTools = (process.env.CODE_EXECUTION_ALLOWED_TOOLS ?? '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+    const allowedPrefixes = (process.env.CODE_EXECUTION_ALLOWED_TOOL_PREFIXES ?? '')
+      .split(',')
+      .map(s => s.trim())
+      .filter(Boolean);
+
+    this.allowedToolNames = new Set(allowedTools);
+    this.allowedToolPrefixes = allowedPrefixes;
+    this.enforceToolAllowlist = requireAllowlist || allowedTools.length > 0 || allowedPrefixes.length > 0;
+  }
+
+  private isProgrammaticToolAllowed(toolName: string): boolean {
+    if (!this.enforceToolAllowlist) {
+      return true;
+    }
+
+    if (this.allowedToolNames.has(toolName)) {
+      return true;
+    }
+
+    for (const prefix of this.allowedToolPrefixes) {
+      if (toolName.startsWith(prefix)) {
+        return true;
+      }
+    }
+
+    return false;
+  }
+
+  private getTokenizer(sessionId: string | undefined): PIITokenizer | null {
+    return getPIITokenizerForSession(sessionId);
   }
 
   /**
@@ -131,6 +174,7 @@ export class CodeExecutor {
       sdkParts.push(`// === ${backendId} ===`);
 
       for (const tool of backend.tools) {
+        if (!this.isProgrammaticToolAllowed(tool.name)) continue;
         const toolSafeName = this.toSafeIdentifier(tool.name);
         const params = this.generateParamsInterface(tool.inputSchema);
 
@@ -359,14 +403,17 @@ export class CodeExecutor {
       captureConsole = true,
       prettyConsole = false,
       context = {},
+      sessionId,
     } = options;
+
+    const tokenizer = this.getTokenizer(sessionId);
 
     const startTime = Date.now();
     const output: string[] = [];
     let totalOutputSize = 0;
 
     // Create tool call functions
-    const toolFunctions = this.createToolFunctions();
+    const toolFunctions = this.createToolFunctions(tokenizer);
 
     // Create console capture
     const consoleCapture = {
@@ -385,9 +432,11 @@ export class CodeExecutor {
           })
           .join(' ');
 
-        totalOutputSize += line.length;
+        const safeLine = tokenizer ? tokenizer.tokenize(line).text : line;
+
+        totalOutputSize += safeLine.length;
         if (totalOutputSize <= maxOutputSize) {
-          output.push(line);
+          output.push(safeLine);
         } else if (output[output.length - 1] !== '[Output truncated...]') {
           output.push('[Output truncated...]');
         }
@@ -439,11 +488,16 @@ export class CodeExecutor {
       // Wait for the async result
       const returnValue = await result;
 
+      const sanitizedReturnValue = this.sanitizeReturnValue(returnValue);
+      const tokenizedReturnValue = tokenizer
+        ? tokenizer.tokenizeObject(sanitizedReturnValue).result
+        : sanitizedReturnValue;
+
       return {
         success: true,
         output,
         executionTime: Date.now() - startTime,
-        returnValue: this.sanitizeReturnValue(returnValue),
+        returnValue: tokenizedReturnValue,
       };
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : String(error);
@@ -461,7 +515,7 @@ export class CodeExecutor {
   /**
    * Create tool call functions for the sandbox
    */
-  private createToolFunctions(): Record<string, (...args: unknown[]) => Promise<ToolCallResult>> {
+  private createToolFunctions(tokenizer: PIITokenizer | null): Record<string, (...args: unknown[]) => Promise<ToolCallResult>> {
     const functions: Record<string, (...args: unknown[]) => Promise<ToolCallResult>> = {};
     const backends = this.backendManager.getBackends();
 
@@ -469,13 +523,14 @@ export class CodeExecutor {
       if (backend.status !== 'connected') continue;
 
       for (const tool of backend.tools) {
+        if (!this.isProgrammaticToolAllowed(tool.name)) continue;
         const safeName = this.toSafeIdentifier(tool.name);
 
         functions[safeName] = async (args: unknown = {}) => {
           try {
             const response: MCPResponse = await this.backendManager.callTool(
               tool.name,
-              args
+              tokenizer ? tokenizer.detokenizeObject(args) : args
             );
 
             if (response.error) {
@@ -505,10 +560,14 @@ export class CodeExecutor {
         return { success: false, error: 'Tool name must be a string' };
       }
 
+      if (!this.isProgrammaticToolAllowed(toolName)) {
+        return { success: false, error: `Tool not allowed for programmatic calls: ${toolName}` };
+      }
+
       try {
         const response: MCPResponse = await this.backendManager.callTool(
           toolName,
-          args
+          tokenizer ? tokenizer.detokenizeObject(args) : args
         );
 
         if (response.error) {
