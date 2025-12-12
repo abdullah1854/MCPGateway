@@ -82,6 +82,8 @@ export interface ExecutionOptions {
   maxOutputSize?: number;
   /** Whether to capture console.log output */
   captureConsole?: boolean;
+  /** Pretty-print objects in console output (more tokens) */
+  prettyConsole?: boolean;
   /** Context variables to inject */
   context?: Record<string, unknown>;
 }
@@ -355,6 +357,7 @@ export class CodeExecutor {
       timeout = this.defaultTimeout,
       maxOutputSize = this.maxOutputSize,
       captureConsole = true,
+      prettyConsole = false,
       context = {},
     } = options;
 
@@ -369,9 +372,18 @@ export class CodeExecutor {
     const consoleCapture = {
       log: (...args: unknown[]) => {
         if (!captureConsole) return;
-        const line = args.map(arg =>
-          typeof arg === 'object' ? JSON.stringify(arg, null, 2) : String(arg)
-        ).join(' ');
+        const line = args
+          .map(arg => {
+            if (typeof arg === 'object' && arg !== null) {
+              try {
+                return prettyConsole ? JSON.stringify(arg, null, 2) : JSON.stringify(arg);
+              } catch {
+                return '[Unserializable object]';
+              }
+            }
+            return String(arg);
+          })
+          .join(' ');
 
         totalOutputSize += line.length;
         if (totalOutputSize <= maxOutputSize) {

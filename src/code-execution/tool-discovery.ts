@@ -3,12 +3,29 @@
  *
  * Allows agents to search and filter tools without loading all definitions upfront.
  * This reduces token usage significantly when dealing with many tools.
+ * 
+ * Implements patterns from Anthropic's Advanced Tool Use:
+ * @see https://www.anthropic.com/engineering/advanced-tool-use
  */
 
 import { BackendManager } from '../backend/index.js';
 import { MCPTool } from '../types.js';
 
-export type DetailLevel = 'name_only' | 'name_description' | 'full_schema';
+export type DetailLevel = 'name_only' | 'name_description' | 'compact_schema' | 'full_schema';
+
+/**
+ * Tool categories for semantic grouping
+ */
+export const TOOL_CATEGORIES: Record<string, string[]> = {
+  database: ['query', 'sql', 'table', 'schema', 'insert', 'update', 'delete', 'select', 'database', 'db'],
+  filesystem: ['read', 'write', 'file', 'directory', 'path', 'copy', 'move', 'delete', 'list', 'folder'],
+  api: ['fetch', 'http', 'request', 'endpoint', 'rest', 'graphql', 'api', 'webhook', 'url'],
+  ai: ['generate', 'complete', 'embed', 'analyze', 'classify', 'llm', 'model', 'prompt', 'chat'],
+  search: ['search', 'find', 'query', 'filter', 'lookup', 'index'],
+  transform: ['convert', 'transform', 'parse', 'format', 'encode', 'decode', 'serialize'],
+  auth: ['auth', 'login', 'token', 'oauth', 'credential', 'permission', 'role'],
+  messaging: ['send', 'email', 'message', 'notify', 'slack', 'discord', 'sms'],
+};
 
 export interface ToolSearchOptions {
   /** Search query to match against tool names and descriptions */
@@ -17,8 +34,12 @@ export interface ToolSearchOptions {
   backend?: string;
   /** Filter by tool name prefix */
   prefix?: string;
+  /** Filter by tool category (database, filesystem, api, ai, search, transform, auth, messaging) */
+  category?: string;
   /** Detail level to return */
   detailLevel?: DetailLevel;
+  /** Whether to include input examples */
+  includeExamples?: boolean;
   /** Maximum number of results */
   limit?: number;
   /** Offset for pagination */
@@ -34,8 +55,12 @@ export interface ToolSearchResult {
 export interface ToolInfo {
   name: string;
   description?: string;
+  shortDescription?: string;
   inputSchema?: MCPTool['inputSchema'];
+  inputExamples?: Record<string, unknown>[];
   backend: string;
+  category?: string;
+  estimatedTokens?: number;
 }
 
 export interface ToolTreeNode {
@@ -47,12 +72,66 @@ export interface ToolTreeNode {
 
 export class ToolDiscovery {
   private backendManager: BackendManager;
-  private toolCache: Map<string, { tool: MCPTool; backend: string }> = new Map();
+  private toolCache: Map<string, { tool: MCPTool; backend: string; category?: string }> = new Map();
   private lastCacheUpdate = 0;
   private cacheTTL = 30000; // 30 seconds
 
   constructor(backendManager: BackendManager) {
     this.backendManager = backendManager;
+  }
+
+  /**
+   * Estimate tokens for a given object (roughly 4 chars per token)
+   */
+  static estimateTokens(obj: unknown): number {
+    return Math.ceil(JSON.stringify(obj).length / 4);
+  }
+
+  /**
+   * Generate a short description (max 60 chars) from a longer one
+   */
+  static generateShortDescription(description?: string, name?: string): string {
+    const desc = description || name || '';
+    if (desc.length <= 60) return desc;
+
+    // Try to get first sentence
+    const firstSentence = desc.split(/[.!?]/)[0];
+    if (firstSentence && firstSentence.length <= 60) return firstSentence;
+
+    // Truncate with ellipsis
+    return desc.substring(0, 57) + '...';
+  }
+
+  /**
+   * Compact a schema by removing descriptions and examples
+   * This saves ~40% tokens based on Anthropic's recommendations
+   */
+  static compactSchema(schema: unknown): unknown {
+    if (!schema || typeof schema !== 'object') return schema;
+
+    return JSON.parse(JSON.stringify(schema, (key, value) => {
+      // Remove verbose fields that consume tokens
+      if (key === 'description' || key === 'examples' || key === 'example' || key === '$schema') {
+        return undefined;
+      }
+      return value;
+    }));
+  }
+
+  /**
+   * Detect category from tool name and description
+   */
+  static detectCategory(name: string, description?: string): string | undefined {
+    const searchText = `${name} ${description || ''}`.toLowerCase();
+
+    for (const [category, keywords] of Object.entries(TOOL_CATEGORIES)) {
+      for (const keyword of keywords) {
+        if (searchText.includes(keyword)) {
+          return category;
+        }
+      }
+    }
+    return undefined;
   }
 
   /**
@@ -71,7 +150,8 @@ export class ToolDiscovery {
       if (backend.status !== 'connected') continue;
 
       for (const tool of backend.tools) {
-        this.toolCache.set(tool.name, { tool, backend: backendId });
+        const category = ToolDiscovery.detectCategory(tool.name, tool.description);
+        this.toolCache.set(tool.name, { tool, backend: backendId, category });
       }
     }
 
@@ -88,12 +168,14 @@ export class ToolDiscovery {
       query,
       backend,
       prefix,
+      category,
       detailLevel = 'name_description',
+      includeExamples = false,
       limit = 50,
       offset = 0,
     } = options;
 
-    let results: { tool: MCPTool; backend: string }[] = [];
+    let results: { tool: MCPTool; backend: string; category?: string }[] = [];
 
     // Filter tools
     for (const entry of this.toolCache.values()) {
@@ -102,6 +184,9 @@ export class ToolDiscovery {
 
       // Prefix filter
       if (prefix && !entry.tool.name.startsWith(prefix)) continue;
+
+      // Category filter
+      if (category && entry.category !== category) continue;
 
       // Query filter (search in name and description)
       if (query) {
@@ -120,18 +205,36 @@ export class ToolDiscovery {
     results = results.slice(offset, offset + limit);
 
     // Map to requested detail level
-    const tools: ToolInfo[] = results.map(({ tool, backend: backendId }) => {
+    const tools: ToolInfo[] = results.map(({ tool, backend: backendId, category: toolCategory }) => {
       const info: ToolInfo = {
         name: tool.name,
         backend: backendId,
       };
 
-      if (detailLevel === 'name_description' || detailLevel === 'full_schema') {
+      // Always include category if detected
+      if (toolCategory) {
+        info.category = toolCategory;
+      }
+
+      if (detailLevel === 'name_description' || detailLevel === 'compact_schema' || detailLevel === 'full_schema') {
         info.description = tool.description;
+        info.shortDescription = ToolDiscovery.generateShortDescription(tool.description, tool.name);
+      }
+
+      if (detailLevel === 'compact_schema') {
+        // Compact schema: types only, no descriptions
+        info.inputSchema = ToolDiscovery.compactSchema(tool.inputSchema) as MCPTool['inputSchema'];
+        info.estimatedTokens = ToolDiscovery.estimateTokens(info);
       }
 
       if (detailLevel === 'full_schema') {
         info.inputSchema = tool.inputSchema;
+        info.estimatedTokens = ToolDiscovery.estimateTokens(info);
+      }
+
+      // Include examples if requested and available
+      if (includeExamples && tool.inputExamples && tool.inputExamples.length > 0) {
+        info.inputExamples = tool.inputExamples;
       }
 
       return info;
@@ -147,18 +250,74 @@ export class ToolDiscovery {
   /**
    * Get full schema for a specific tool (lazy loading)
    */
-  getToolSchema(toolName: string): ToolInfo | null {
+  getToolSchema(toolName: string, compact = false): ToolInfo | null {
     this.refreshCache();
 
     const entry = this.toolCache.get(toolName);
     if (!entry) return null;
 
-    return {
+    const schema = compact
+      ? ToolDiscovery.compactSchema(entry.tool.inputSchema) as MCPTool['inputSchema']
+      : entry.tool.inputSchema;
+
+    const info: ToolInfo = {
       name: entry.tool.name,
       description: entry.tool.description,
-      inputSchema: entry.tool.inputSchema,
+      shortDescription: ToolDiscovery.generateShortDescription(entry.tool.description, entry.tool.name),
+      inputSchema: schema,
       backend: entry.backend,
+      category: entry.category,
     };
+
+    // Include examples if available
+    if (entry.tool.inputExamples && entry.tool.inputExamples.length > 0) {
+      info.inputExamples = entry.tool.inputExamples;
+    }
+
+    info.estimatedTokens = ToolDiscovery.estimateTokens(info);
+
+    return info;
+  }
+
+  /**
+   * Get schemas for multiple tools at once (batch loading)
+   */
+  getToolSchemas(toolNames: string[], compact = false): { tools: ToolInfo[]; notFound: string[] } {
+    this.refreshCache();
+
+    const tools: ToolInfo[] = [];
+    const notFound: string[] = [];
+
+    for (const toolName of toolNames) {
+      const schema = this.getToolSchema(toolName, compact);
+      if (schema) {
+        tools.push(schema);
+      } else {
+        notFound.push(toolName);
+      }
+    }
+
+    return { tools, notFound };
+  }
+
+  /**
+   * Get available tool categories with counts
+   */
+  getToolCategories(): Record<string, { count: number; tools: string[] }> {
+    this.refreshCache();
+
+    const categories: Record<string, { count: number; tools: string[] }> = {};
+
+    for (const [toolName, entry] of this.toolCache) {
+      const category = entry.category || 'other';
+      if (!categories[category]) {
+        categories[category] = { count: 0, tools: [] };
+      }
+      categories[category].count++;
+      categories[category].tools.push(toolName);
+    }
+
+    return categories;
   }
 
   /**
@@ -233,6 +392,7 @@ export class ToolDiscovery {
           name: entry.tool.name,
           description: entry.tool.description,
           backend: entry.backend,
+          category: entry.category,
         });
       }
     }

@@ -89,6 +89,12 @@ export interface MCPTool {
     properties?: Record<string, unknown>;
     required?: string[];
   };
+  /**
+   * Input examples for improved tool usage accuracy.
+   * Based on Anthropic's Tool Use Examples feature.
+   * @see https://www.anthropic.com/engineering/advanced-tool-use
+   */
+  inputExamples?: Record<string, unknown>[];
 }
 
 export interface MCPResource {

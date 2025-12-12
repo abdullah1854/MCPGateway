@@ -149,12 +149,33 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
 
   /**
    * GET /tools/names
-   * Get all tool names (minimal response for token efficiency)
+   * Get tool names (minimal response for token efficiency)
    */
-  router.get('/tools/names', (_req: Request, res: Response) => {
+  router.get('/tools/names', (req: Request, res: Response) => {
     try {
-      const names = toolDiscovery.getAllToolNames();
-      res.json({ names, count: names.length });
+      const backend = req.query.backend as string | undefined;
+      const prefix = req.query.prefix as string | undefined;
+      const limit = req.query.limit ? parseInt(req.query.limit as string, 10) : 200;
+      const offset = req.query.offset ? parseInt(req.query.offset as string, 10) : 0;
+
+      const safeLimit = Number.isFinite(limit) ? Math.min(Math.max(limit, 1), 1000) : 200;
+      const safeOffset = Number.isFinite(offset) ? Math.max(offset, 0) : 0;
+
+      const result = toolDiscovery.searchTools({
+        backend,
+        prefix,
+        detailLevel: 'name_only',
+        limit: safeLimit,
+        offset: safeOffset,
+      });
+
+      res.json({
+        names: result.tools.map(t => t.name),
+        total: result.total,
+        limit: safeLimit,
+        offset: safeOffset,
+        hasMore: result.hasMore,
+      });
     } catch (error) {
       res.status(500).json({
         error: 'Failed to get tool names',
@@ -574,9 +595,12 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
    */
   router.get('/workspace/session', (req: Request, res: Response) => {
     try {
-      const sessionId = (req.headers['x-session-id'] as string) || 'default';
+      const sessionId =
+        (req.headers['mcp-session-id'] as string) ||
+        (req.headers['x-session-id'] as string) ||
+        'default';
       const session = workspaceManager.loadSessionState(sessionId);
-      res.json({ session });
+      res.json({ session, sessionId });
     } catch (error) {
       res.status(500).json({
         error: 'Failed to get session',
@@ -591,12 +615,15 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
    */
   router.post('/workspace/session', (req: Request, res: Response) => {
     try {
-      const sessionId = (req.headers['x-session-id'] as string) || 'default';
+      const sessionId =
+        (req.headers['mcp-session-id'] as string) ||
+        (req.headers['x-session-id'] as string) ||
+        'default';
       const updates = req.body;
 
       const session = workspaceManager.updateSessionState(sessionId, updates);
 
-      res.json({ success: true, session });
+      res.json({ success: true, session, sessionId });
     } catch (error) {
       res.status(500).json({
         error: 'Failed to update session',

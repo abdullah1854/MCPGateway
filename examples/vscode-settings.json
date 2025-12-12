@@ -5,7 +5,7 @@
   "mcp.servers": {
     "mcp-gateway": {
       "type": "http",
-      "url": "http://localhost:3000/mcp"
+      "url": "http://localhost:3010/mcp"
     }
   },
 

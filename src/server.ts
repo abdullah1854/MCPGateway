@@ -61,7 +61,7 @@ export class MCPGatewayServer {
       origin: corsOrigins === '*' ? '*' : corsOrigins,
       credentials: true,
       methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'Mcp-Session-Id', 'Accept'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'Mcp-Session-Id', 'X-Session-Id', 'Accept'],
       exposedHeaders: ['Mcp-Session-Id'],
     }));
 
