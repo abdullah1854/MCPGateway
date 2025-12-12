@@ -275,7 +275,16 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
   router.post('/tools/:name/call', async (req: Request, res: Response) => {
     try {
       const { name } = req.params;
-      const { args = {}, filter } = req.body;
+      const { args = {}, filter, smart } = req.body as {
+        args?: unknown;
+        filter?: unknown;
+        smart?: unknown;
+      };
+
+      if (smart !== undefined && typeof smart !== 'boolean') {
+        res.status(400).json({ error: 'smart must be a boolean' });
+        return;
+      }
 
       // Validate filter if provided
       if (filter) {
@@ -302,8 +311,11 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
 
       // Apply filtering if requested
       let result = response.result;
-      if (filter) {
-        result = applyResultFilter(result, filter);
+      const effectiveFilter =
+        (filter as z.infer<typeof ResultFilterSchema> | undefined) ??
+        ((smart as boolean | undefined) !== false ? { maxRows: 20, format: 'summary' } : undefined);
+      if (effectiveFilter) {
+        result = applyResultFilter(result, effectiveFilter);
       }
 
       res.json({

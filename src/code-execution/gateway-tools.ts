@@ -181,6 +181,11 @@ export function createGatewayTools(
               },
             },
           },
+          smart: {
+            type: 'boolean',
+            description: 'Auto-apply summary filter when no filter provided. Set false for raw results.',
+            default: true,
+          },
         },
         required: ['toolName'],
       },
@@ -406,6 +411,7 @@ export function createGatewayTools(
       const toolName = params.toolName as string;
       const toolArgs = params.args || {};
       const filter = params.filter as { maxRows?: number; fields?: string[]; format?: string } | undefined;
+      const smart = params.smart as boolean | undefined;
 
       const response = await backendManager.callTool(toolName, toolArgs);
       if (response.error) {
@@ -413,8 +419,10 @@ export function createGatewayTools(
       }
 
       let result = response.result;
-      if (filter) {
-        result = applyResultFilter(result, filter);
+      const effectiveFilter =
+        filter ?? (smart !== false ? { maxRows: 20, format: 'summary' } : undefined);
+      if (effectiveFilter) {
+        result = applyResultFilter(result, effectiveFilter);
       }
 
       return { success: true, result };

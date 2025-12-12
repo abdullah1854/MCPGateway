@@ -742,6 +742,20 @@ await gateway_call_tool_filtered({
   args: { tableName: "orders" },
   filter: { maxRows: 10, fields: ["id", "status", "total"], format: "summary" }
 });
+
+// Smart filtering is ON by default (maxRows: 20, format: "summary")
+// Just call without filter - tokens are minimized automatically
+await gateway_call_tool_filtered({
+  toolName: "mssql_get_table_data",
+  args: { tableName: "orders" }
+});
+
+// Opt-out for raw results when you need full data
+await gateway_call_tool_filtered({
+  toolName: "mssql_get_table_data",
+  args: { tableName: "orders" },
+  smart: false
+});
 ```
 
 ### 4. Use Aggregations
@@ -824,4 +838,3 @@ npm run build
 ## License
 
 MIT
-
