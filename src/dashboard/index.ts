@@ -10,6 +10,12 @@ import { BackendManager } from '../backend/index.js';
 import ConfigManager from '../config.js';
 import { ServerConfigSchema, ServerConfig } from '../types.js';
 import { logger } from '../logger.js';
+import {
+  getCachedUsageData,
+  getUsageByDateRange,
+  getCurrentSessionUsage,
+  clearUsageCache,
+} from '../services/claude-usage.js';
 
 // Helper to find which backend a tool belongs to based on prefix
 function findBackendIdForTool(toolName: string, backendManager: BackendManager): string | null {
@@ -564,6 +570,92 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
     }
   });
 
+  // ==========================================
+  // Claude Usage API Routes
+  // ==========================================
+
+  // API: Get Claude usage summary
+  router.get('/api/claude-usage', async (_req: Request, res: Response) => {
+    try {
+      const usageData = await getCachedUsageData();
+      if (!usageData) {
+        res.status(503).json({
+          error: 'Usage data not available',
+          message: 'Could not fetch Claude usage data. Make sure ccusage is installed (npx ccusage@latest)',
+        });
+        return;
+      }
+      res.json(usageData);
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to fetch usage data',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // API: Get Claude usage by date range
+  router.get('/api/claude-usage/range', async (req: Request, res: Response) => {
+    try {
+      const { since, until } = req.query;
+      const usageData = await getUsageByDateRange(
+        since as string | undefined,
+        until as string | undefined
+      );
+      if (!usageData) {
+        res.status(503).json({
+          error: 'Usage data not available',
+          message: 'Could not fetch Claude usage data for the specified range',
+        });
+        return;
+      }
+      res.json(usageData);
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to fetch usage data',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // API: Get current session usage (live monitoring)
+  router.get('/api/claude-usage/current', async (_req: Request, res: Response) => {
+    try {
+      const sessionUsage = await getCurrentSessionUsage();
+      if (!sessionUsage) {
+        res.json({ active: false, message: 'No active session found' });
+        return;
+      }
+      res.json({ active: true, session: sessionUsage });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to fetch current session',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // API: Refresh usage cache
+  router.post('/api/claude-usage/refresh', async (_req: Request, res: Response) => {
+    try {
+      clearUsageCache();
+      const usageData = await getCachedUsageData(true);
+      if (!usageData) {
+        res.status(503).json({
+          error: 'Usage data not available',
+          message: 'Could not refresh Claude usage data',
+        });
+        return;
+      }
+      res.json({ success: true, data: usageData });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to refresh usage data',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
   return router;
 }
 
@@ -577,6 +669,7 @@ function getDashboardHTML(): string {
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     :root {
       --bg-primary: #0a0a0f;
@@ -1607,6 +1700,288 @@ function getDashboardHTML(): string {
     }
 
     /* Responsive */
+/* Tab Navigation */
+    .tab-nav {
+      display: flex;
+      gap: 0.5rem;
+      margin-bottom: 1.5rem;
+      border-bottom: 1px solid var(--border);
+      padding-bottom: 0;
+    }
+
+    .tab-btn {
+      padding: 0.875rem 1.5rem;
+      background: transparent;
+      border: none;
+      border-bottom: 2px solid transparent;
+      color: var(--text-muted);
+      font-size: 0.9rem;
+      font-weight: 600;
+      font-family: inherit;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .tab-btn:hover {
+      color: var(--text-primary);
+    }
+
+    .tab-btn.active {
+      color: var(--accent);
+      border-bottom-color: var(--accent);
+    }
+
+    .tab-content {
+      display: none;
+    }
+
+    .tab-content.active {
+      display: block;
+    }
+
+    /* Claude Usage Section */
+    .usage-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .usage-stat {
+      background: var(--bg-card);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      padding: 1.25rem;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      position: relative;
+      overflow: hidden;
+    }
+
+    .usage-stat::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: var(--gradient-1);
+    }
+
+    .usage-stat.success::before {
+      background: var(--success);
+    }
+
+    .usage-stat.warning::before {
+      background: var(--warning);
+    }
+
+    .usage-stat-value {
+      font-size: 1.75rem;
+      font-weight: 700;
+      background: var(--gradient-1);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      line-height: 1.2;
+    }
+
+    .usage-stat-value.large {
+      font-size: 2.25rem;
+    }
+
+    .usage-stat-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-weight: 500;
+      margin-top: 0.5rem;
+    }
+
+    .usage-stat-sublabel {
+      font-size: 0.8rem;
+      color: var(--text-secondary);
+      margin-top: 0.25rem;
+    }
+
+    .charts-grid {
+      display: grid;
+      grid-template-columns: 2fr 1fr;
+      gap: 1.5rem;
+      margin-bottom: 2rem;
+    }
+
+    @media (max-width: 1200px) {
+      .charts-grid {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .chart-card {
+      background: var(--bg-card);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      padding: 1.5rem;
+      border-radius: 20px;
+      border: 1px solid var(--border);
+    }
+
+    .chart-card h3 {
+      font-size: 1rem;
+      font-weight: 600;
+      margin-bottom: 1rem;
+      color: var(--text-primary);
+    }
+
+    .chart-container {
+      position: relative;
+      height: 300px;
+    }
+
+    .top-days-list {
+      list-style: none;
+      padding: 0;
+      margin: 0;
+    }
+
+    .top-days-list li {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 0.75rem 0;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .top-days-list li:last-child {
+      border-bottom: none;
+    }
+
+    .top-day-date {
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+    }
+
+    .top-day-cost {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--accent);
+    }
+
+    .model-breakdown {
+      margin-top: 1rem;
+    }
+
+    .model-item {
+      display: flex;
+      align-items: center;
+      gap: 0.75rem;
+      margin-bottom: 0.75rem;
+    }
+
+    .model-color {
+      width: 12px;
+      height: 12px;
+      border-radius: 3px;
+    }
+
+    .model-name {
+      flex: 1;
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+    }
+
+    .model-cost {
+      font-size: 0.85rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .model-percent {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      min-width: 45px;
+      text-align: right;
+    }
+
+    .live-session {
+      background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(34, 211, 238, 0.1));
+      border: 1px solid var(--accent);
+      border-radius: 16px;
+      padding: 1.25rem;
+      margin-bottom: 1.5rem;
+      display: flex;
+      align-items: center;
+      gap: 1rem;
+    }
+
+    .live-indicator {
+      width: 10px;
+      height: 10px;
+      background: var(--success);
+      border-radius: 50%;
+      animation: pulse 2s infinite;
+    }
+
+    .live-session-info {
+      flex: 1;
+    }
+
+    .live-session-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    .live-session-meta {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-top: 0.25rem;
+    }
+
+    .live-session-cost {
+      font-size: 1.25rem;
+      font-weight: 700;
+      color: var(--accent);
+    }
+
+    .usage-loading {
+      text-align: center;
+      padding: 3rem;
+      color: var(--text-muted);
+    }
+
+    .usage-error {
+      text-align: center;
+      padding: 2rem;
+      color: var(--error);
+      background: rgba(248, 113, 113, 0.1);
+      border-radius: 12px;
+      border: 1px solid var(--error);
+    }
+
+    .refresh-btn {
+      background: var(--bg-glass);
+      border: 1px solid var(--border);
+      padding: 0.5rem 1rem;
+      border-radius: 8px;
+      color: var(--text-secondary);
+      font-size: 0.8rem;
+      cursor: pointer;
+      transition: all 0.2s ease;
+      display: inline-flex;
+      align-items: center;
+      gap: 0.5rem;
+    }
+
+    .refresh-btn:hover {
+      background: var(--bg-tertiary);
+      border-color: var(--border-hover);
+    }
+
     @media (max-width: 1024px) {
       .header-actions {
         flex-wrap: wrap;
@@ -1685,34 +2060,74 @@ function getDashboardHTML(): string {
         </button>
       </div>
     </header>
-    
-    <div class="controls">
-      <div class="search-box">
-        <input type="text" id="search" placeholder="Search tools by name or description..." />
+
+    <!-- Tab Navigation -->
+    <div class="tab-nav">
+      <button class="tab-btn active" onclick="switchTab('servers')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
+        Servers & Tools
+      </button>
+      <button class="tab-btn" onclick="switchTab('usage')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="20" x2="12" y2="10"></line><line x1="18" y1="20" x2="18" y2="4"></line><line x1="6" y1="20" x2="6" y2="16"></line></svg>
+        Claude Usage
+      </button>
+    </div>
+
+    <!-- Servers Tab -->
+    <div id="tab-servers" class="tab-content active">
+      <div class="controls">
+        <div class="search-box">
+          <input type="text" id="search" placeholder="Search tools by name or description..." />
+        </div>
+        <div class="filter-pills" id="backend-filters"></div>
+        <div class="quick-actions">
+          <button class="btn btn-secondary" onclick="enableAll()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
+            Enable All
+          </button>
+          <button class="btn btn-secondary" onclick="disableAll()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+            Disable All
+          </button>
+        </div>
       </div>
-      <div class="filter-pills" id="backend-filters"></div>
-      <div class="quick-actions">
-        <button class="btn btn-secondary" onclick="enableAll()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="20 6 9 17 4 12"></polyline></svg>
-          Enable All
-        </button>
-        <button class="btn btn-secondary" onclick="disableAll()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
-          Disable All
-        </button>
+
+      <div class="section-header">
+        <div>
+          <div class="section-title">Servers &amp; tools</div>
+          <div class="section-subtitle">Toggle connections, filter by backend, and expand to view every tool/subtool.</div>
+        </div>
+        <div class="section-hint">Tip: click a server card to expand all tools</div>
+      </div>
+
+      <div id="backends-container">
+        <div class="loading">Loading backends</div>
       </div>
     </div>
 
-    <div class="section-header">
-      <div>
-        <div class="section-title">Servers &amp; tools</div>
-        <div class="section-subtitle">Toggle connections, filter by backend, and expand to view every tool/subtool.</div>
+    <!-- Claude Usage Tab -->
+    <div id="tab-usage" class="tab-content">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Claude Code Usage Analytics</div>
+          <div class="section-subtitle">Track your Claude API usage, costs, and efficiency metrics.</div>
+        </div>
+        <button class="refresh-btn" onclick="refreshUsageData()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+          Refresh
+        </button>
       </div>
-      <div class="section-hint">Tip: click a server card to expand all tools</div>
-    </div>
-    
-    <div id="backends-container">
-      <div class="loading">Loading backends</div>
+
+      <!-- Live Session -->
+      <div id="live-session-container"></div>
+
+      <!-- Usage Stats -->
+      <div id="usage-stats-container">
+        <div class="usage-loading">Loading usage data...</div>
+      </div>
+
+      <!-- Charts -->
+      <div id="usage-charts-container"></div>
     </div>
   </div>
   
@@ -2616,10 +3031,410 @@ function getDashboardHTML(): string {
       }
     });
 
+    // ==========================================
+    // Tab Navigation
+    // ==========================================
+    let currentTab = 'servers';
+
+    function switchTab(tabId) {
+      currentTab = tabId;
+
+      // Update tab buttons
+      document.querySelectorAll('.tab-btn').forEach(btn => {
+        btn.classList.remove('active');
+      });
+      document.querySelector(\`[onclick="switchTab('\${tabId}')"]\`).classList.add('active');
+
+      // Update tab content
+      document.querySelectorAll('.tab-content').forEach(content => {
+        content.classList.remove('active');
+      });
+      document.getElementById('tab-' + tabId).classList.add('active');
+
+      // Load data for usage tab
+      if (tabId === 'usage' && !usageData) {
+        loadUsageData();
+      }
+    }
+
+    // ==========================================
+    // Claude Usage Analytics
+    // ==========================================
+    let usageData = null;
+    let dailyChart = null;
+    let modelChart = null;
+    let liveSessionInterval = null;
+
+    async function loadUsageData() {
+      const statsContainer = document.getElementById('usage-stats-container');
+      const chartsContainer = document.getElementById('usage-charts-container');
+
+      statsContainer.innerHTML = '<div class="usage-loading">Loading usage data...</div>';
+      chartsContainer.innerHTML = '';
+
+      try {
+        const res = await fetch('/dashboard/api/claude-usage');
+
+        if (!res.ok) {
+          const error = await res.json();
+          statsContainer.innerHTML = \`
+            <div class="usage-error">
+              <p><strong>Failed to load usage data</strong></p>
+              <p>\${error.message || 'Make sure ccusage is installed: npx ccusage@latest'}</p>
+            </div>
+          \`;
+          return;
+        }
+
+        usageData = await res.json();
+        renderUsageStats();
+        renderUsageCharts();
+        startLiveSessionMonitor();
+      } catch (err) {
+        statsContainer.innerHTML = \`
+          <div class="usage-error">
+            <p><strong>Error loading usage data</strong></p>
+            <p>\${err.message}</p>
+          </div>
+        \`;
+      }
+    }
+
+    function renderUsageStats() {
+      if (!usageData) return;
+
+      const container = document.getElementById('usage-stats-container');
+      const formatCost = (cost) => '$' + cost.toFixed(2);
+      const formatNumber = (num) => num.toLocaleString();
+      const formatPercent = (pct) => pct.toFixed(1) + '%';
+
+      container.innerHTML = \`
+        <div class="usage-grid">
+          <div class="usage-stat">
+            <div class="usage-stat-value large">\${formatCost(usageData.totalCost)}</div>
+            <div class="usage-stat-label">Total Spend</div>
+            <div class="usage-stat-sublabel">\${usageData.daysActive} days active</div>
+          </div>
+          <div class="usage-stat">
+            <div class="usage-stat-value">\${formatCost(usageData.avgCostPerDay)}</div>
+            <div class="usage-stat-label">Avg Cost/Day</div>
+          </div>
+          <div class="usage-stat success">
+            <div class="usage-stat-value">\${formatPercent(usageData.cacheHitRatio)}</div>
+            <div class="usage-stat-label">Cache Hit Ratio</div>
+            <div class="usage-stat-sublabel">\${formatNumber(usageData.totalCacheReadTokens)} reads</div>
+          </div>
+          <div class="usage-stat">
+            <div class="usage-stat-value">\${formatNumber(Math.round((usageData.totalInputTokens + usageData.totalOutputTokens) / 1000000))}M</div>
+            <div class="usage-stat-label">Total Tokens</div>
+            <div class="usage-stat-sublabel">\${formatNumber(Math.round(usageData.totalInputTokens / 1000))}k in / \${formatNumber(Math.round(usageData.totalOutputTokens / 1000))}k out</div>
+          </div>
+        </div>
+      \`;
+    }
+
+    function renderUsageCharts() {
+      if (!usageData || !usageData.daily || usageData.daily.length === 0) return;
+
+      const container = document.getElementById('usage-charts-container');
+
+      // Get model colors
+      const modelColors = {
+        'Claude Opus': '#8b5cf6',
+        'Claude Sonnet': '#22d3ee',
+        'Claude Haiku': '#34d399',
+      };
+
+      // Build model breakdown HTML
+      const modelBreakdownHTML = usageData.modelDistribution
+        .slice(0, 5)
+        .map((m, i) => {
+          const color = modelColors[m.model] || ['#f87171', '#fbbf24', '#a78bfa'][i % 3];
+          return \`
+            <div class="model-item">
+              <div class="model-color" style="background: \${color}"></div>
+              <span class="model-name">\${m.model}</span>
+              <span class="model-cost">$\${m.cost.toFixed(2)}</span>
+              <span class="model-percent">\${m.percentage.toFixed(1)}%</span>
+            </div>
+          \`;
+        })
+        .join('');
+
+      // Build top days HTML
+      const topDaysHTML = usageData.topDays
+        .slice(0, 5)
+        .map(day => \`
+          <li>
+            <span class="top-day-date">\${formatDate(day.date)}</span>
+            <span class="top-day-cost">$\${day.totalCost.toFixed(2)}</span>
+          </li>
+        \`)
+        .join('');
+
+      container.innerHTML = \`
+        <div class="charts-grid">
+          <div class="chart-card">
+            <h3>Daily Cost Trend</h3>
+            <div class="chart-container">
+              <canvas id="daily-chart"></canvas>
+            </div>
+          </div>
+          <div class="chart-card">
+            <h3>Model Distribution</h3>
+            <div class="chart-container">
+              <canvas id="model-chart"></canvas>
+            </div>
+            <div class="model-breakdown">
+              \${modelBreakdownHTML}
+            </div>
+          </div>
+        </div>
+        <div class="charts-grid">
+          <div class="chart-card">
+            <h3>Top Usage Days</h3>
+            <ul class="top-days-list">
+              \${topDaysHTML || '<li><span class="top-day-date">No data</span></li>'}
+            </ul>
+          </div>
+          <div class="chart-card">
+            <h3>Token Efficiency</h3>
+            <div class="chart-container" style="height: 200px;">
+              <canvas id="efficiency-chart"></canvas>
+            </div>
+          </div>
+        </div>
+      \`;
+
+      // Render charts
+      renderDailyChart();
+      renderModelChart();
+      renderEfficiencyChart();
+    }
+
+    function formatDate(dateStr) {
+      const date = new Date(dateStr);
+      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
+    }
+
+    function renderDailyChart() {
+      const ctx = document.getElementById('daily-chart');
+      if (!ctx || !usageData?.daily) return;
+
+      // Get last 30 days of data
+      const recentData = usageData.daily.slice(-30);
+
+      if (dailyChart) {
+        dailyChart.destroy();
+      }
+
+      dailyChart = new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: recentData.map(d => formatDate(d.date)),
+          datasets: [{
+            label: 'Daily Cost',
+            data: recentData.map(d => d.totalCost),
+            backgroundColor: 'rgba(139, 92, 246, 0.6)',
+            borderColor: 'rgba(139, 92, 246, 1)',
+            borderWidth: 1,
+            borderRadius: 4,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          plugins: {
+            legend: {
+              display: false
+            },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => '$' + ctx.raw.toFixed(2)
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid: {
+                display: false,
+                color: 'rgba(255,255,255,0.1)'
+              },
+              ticks: {
+                color: '#94a3b8',
+                maxRotation: 45,
+                minRotation: 45
+              }
+            },
+            y: {
+              grid: {
+                color: 'rgba(255,255,255,0.05)'
+              },
+              ticks: {
+                color: '#94a3b8',
+                callback: (val) => '$' + val
+              }
+            }
+          }
+        }
+      });
+    }
+
+    function renderModelChart() {
+      const ctx = document.getElementById('model-chart');
+      if (!ctx || !usageData?.modelDistribution) return;
+
+      const colors = ['#8b5cf6', '#22d3ee', '#34d399', '#fbbf24', '#f87171'];
+      const data = usageData.modelDistribution.slice(0, 5);
+
+      if (modelChart) {
+        modelChart.destroy();
+      }
+
+      modelChart = new Chart(ctx, {
+        type: 'doughnut',
+        data: {
+          labels: data.map(m => m.model),
+          datasets: [{
+            data: data.map(m => m.cost),
+            backgroundColor: colors.slice(0, data.length),
+            borderWidth: 0,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          cutout: '65%',
+          plugins: {
+            legend: {
+              display: false
+            },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => ctx.label + ': $' + ctx.raw.toFixed(2)
+              }
+            }
+          }
+        }
+      });
+    }
+
+    function renderEfficiencyChart() {
+      const ctx = document.getElementById('efficiency-chart');
+      if (!ctx || !usageData) return;
+
+      const cacheWrite = usageData.totalCacheCreationTokens;
+      const cacheRead = usageData.totalCacheReadTokens;
+      const input = usageData.totalInputTokens;
+      const output = usageData.totalOutputTokens;
+
+      new Chart(ctx, {
+        type: 'bar',
+        data: {
+          labels: ['Cache Write', 'Cache Read', 'Input', 'Output'],
+          datasets: [{
+            data: [cacheWrite, cacheRead, input, output].map(v => v / 1000000),
+            backgroundColor: ['#fbbf24', '#34d399', '#8b5cf6', '#22d3ee'],
+            borderWidth: 0,
+            borderRadius: 4,
+          }]
+        },
+        options: {
+          responsive: true,
+          maintainAspectRatio: false,
+          indexAxis: 'y',
+          plugins: {
+            legend: {
+              display: false
+            },
+            tooltip: {
+              callbacks: {
+                label: (ctx) => ctx.raw.toFixed(2) + 'M tokens'
+              }
+            }
+          },
+          scales: {
+            x: {
+              grid: {
+                color: 'rgba(255,255,255,0.05)'
+              },
+              ticks: {
+                color: '#94a3b8',
+                callback: (val) => val + 'M'
+              }
+            },
+            y: {
+              grid: {
+                display: false
+              },
+              ticks: {
+                color: '#94a3b8'
+              }
+            }
+          }
+        }
+      });
+    }
+
+    async function refreshUsageData() {
+      usageData = null;
+      await loadUsageData();
+      showToast('Usage data refreshed');
+    }
+
+    // Live session monitoring
+    async function updateLiveSession() {
+      const container = document.getElementById('live-session-container');
+
+      try {
+        const res = await fetch('/dashboard/api/claude-usage/current');
+        const data = await res.json();
+
+        if (data.active && data.session) {
+          const s = data.session;
+          const startTime = s.startTime ? new Date(s.startTime).toLocaleTimeString() : 'Unknown';
+
+          container.innerHTML = \`
+            <div class="live-session">
+              <div class="live-indicator"></div>
+              <div class="live-session-info">
+                <div class="live-session-title">Active Session: \${s.slug || s.sessionId}</div>
+                <div class="live-session-meta">
+                  Started: \${startTime} · Model: \${s.model || 'Unknown'} ·
+                  Tokens: \${(s.inputTokens + s.outputTokens).toLocaleString()}
+                </div>
+              </div>
+              <div class="live-session-cost">$\${s.totalCost.toFixed(4)}</div>
+            </div>
+          \`;
+        } else {
+          container.innerHTML = '';
+        }
+      } catch (err) {
+        container.innerHTML = '';
+      }
+    }
+
+    function startLiveSessionMonitor() {
+      if (liveSessionInterval) {
+        clearInterval(liveSessionInterval);
+      }
+
+      // Initial update
+      updateLiveSession();
+
+      // Update every 5 seconds
+      liveSessionInterval = setInterval(() => {
+        if (currentTab === 'usage') {
+          updateLiveSession();
+        }
+      }, 5000);
+    }
+
     // Initial load
     loadData();
 
-    // Refresh every 30 seconds
+    // Refresh servers every 30 seconds
     setInterval(loadData, 30000);
   </script>
 </body>
