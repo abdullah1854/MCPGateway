@@ -11,7 +11,7 @@
 import { BackendManager } from '../backend/index.js';
 import { MCPTool } from '../types.js';
 
-export type DetailLevel = 'name_only' | 'name_description' | 'compact_schema' | 'full_schema';
+export type DetailLevel = 'name_only' | 'name_description' | 'compact_schema' | 'full_schema' | 'micro_schema';
 
 /**
  * Tool categories for semantic grouping
@@ -119,6 +119,70 @@ export class ToolDiscovery {
   }
 
   /**
+   * Type abbreviation map for micro schema
+   */
+  private static readonly TYPE_ABBREV: Record<string, string> = {
+    string: 's',
+    number: 'n',
+    integer: 'i',
+    boolean: 'b',
+    array: 'a',
+    object: 'o',
+    null: 'x',
+  };
+
+  /**
+   * Micro schema - ultra-compact representation
+   * Saves ~60-70% tokens compared to full schema
+   * Format: { n: "name", t: "s", r: true } instead of { name: "string", type: "string", required: true }
+   */
+  static microSchema(schema: unknown): unknown {
+    if (!schema || typeof schema !== 'object') return schema;
+
+    const obj = schema as Record<string, unknown>;
+
+    // Handle properties object
+    if (obj.type === 'object' && obj.properties) {
+      const props = obj.properties as Record<string, unknown>;
+      const required = new Set((obj.required as string[]) || []);
+      const microProps: Record<string, unknown> = {};
+
+      for (const [key, value] of Object.entries(props)) {
+        const propObj = value as Record<string, unknown>;
+        const microProp: Record<string, unknown> = {
+          t: ToolDiscovery.TYPE_ABBREV[propObj.type as string] || propObj.type,
+        };
+
+        if (required.has(key)) {
+          microProp.r = 1; // required = 1 (true)
+        }
+
+        // Handle enum
+        if (propObj.enum) {
+          microProp.e = propObj.enum;
+        }
+
+        // Handle array items
+        if (propObj.type === 'array' && propObj.items) {
+          const items = propObj.items as Record<string, unknown>;
+          microProp.i = ToolDiscovery.TYPE_ABBREV[items.type as string] || items.type;
+        }
+
+        // Handle default
+        if (propObj.default !== undefined) {
+          microProp.d = propObj.default;
+        }
+
+        microProps[key] = microProp;
+      }
+
+      return { p: microProps };
+    }
+
+    return schema;
+  }
+
+  /**
    * Detect category from tool name and description
    */
   static detectCategory(name: string, description?: string): string | undefined {
@@ -216,9 +280,15 @@ export class ToolDiscovery {
         info.category = toolCategory;
       }
 
-      if (detailLevel === 'name_description' || detailLevel === 'compact_schema' || detailLevel === 'full_schema') {
+      if (detailLevel === 'name_description' || detailLevel === 'compact_schema' || detailLevel === 'full_schema' || detailLevel === 'micro_schema') {
         info.description = tool.description;
         info.shortDescription = ToolDiscovery.generateShortDescription(tool.description, tool.name);
+      }
+
+      if (detailLevel === 'micro_schema') {
+        // Micro schema: ultra-compact with abbreviated types
+        info.inputSchema = ToolDiscovery.microSchema(tool.inputSchema) as MCPTool['inputSchema'];
+        info.estimatedTokens = ToolDiscovery.estimateTokens(info);
       }
 
       if (detailLevel === 'compact_schema') {
@@ -249,16 +319,23 @@ export class ToolDiscovery {
 
   /**
    * Get full schema for a specific tool (lazy loading)
+   * @param toolName - Name of the tool
+   * @param mode - Schema mode: false/undefined=full, true/'compact'=compact, 'micro'=micro
    */
-  getToolSchema(toolName: string, compact = false): ToolInfo | null {
+  getToolSchema(toolName: string, mode: boolean | 'compact' | 'micro' = false): ToolInfo | null {
     this.refreshCache();
 
     const entry = this.toolCache.get(toolName);
     if (!entry) return null;
 
-    const schema = compact
-      ? ToolDiscovery.compactSchema(entry.tool.inputSchema) as MCPTool['inputSchema']
-      : entry.tool.inputSchema;
+    let schema: MCPTool['inputSchema'];
+    if (mode === 'micro') {
+      schema = ToolDiscovery.microSchema(entry.tool.inputSchema) as MCPTool['inputSchema'];
+    } else if (mode === true || mode === 'compact') {
+      schema = ToolDiscovery.compactSchema(entry.tool.inputSchema) as MCPTool['inputSchema'];
+    } else {
+      schema = entry.tool.inputSchema;
+    }
 
     const info: ToolInfo = {
       name: entry.tool.name,
@@ -281,15 +358,16 @@ export class ToolDiscovery {
 
   /**
    * Get schemas for multiple tools at once (batch loading)
+   * @param mode - Schema mode: false/undefined=full, true/'compact'=compact, 'micro'=micro
    */
-  getToolSchemas(toolNames: string[], compact = false): { tools: ToolInfo[]; notFound: string[] } {
+  getToolSchemas(toolNames: string[], mode: boolean | 'compact' | 'micro' = false): { tools: ToolInfo[]; notFound: string[] } {
     this.refreshCache();
 
     const tools: ToolInfo[] = [];
     const notFound: string[] = [];
 
     for (const toolName of toolNames) {
-      const schema = this.getToolSchema(toolName, compact);
+      const schema = this.getToolSchema(toolName, mode);
       if (schema) {
         tools.push(schema);
       } else {

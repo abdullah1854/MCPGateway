@@ -60,3 +60,15 @@ export {
   type SchemaRegistry,
   type DedupStats,
 } from './schema-dedup.js';
+
+// Micro-Schema Mode (Layer 11)
+// Exported via ToolDiscovery.microSchema()
+
+// Delta Responses (Layer 12)
+export {
+  DeltaResponseManager,
+  getDeltaManager,
+  applyDelta,
+  type DeltaResult,
+  type DeltaPatch,
+} from './delta-response.js';

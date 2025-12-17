@@ -15,7 +15,7 @@ A universal Model Context Protocol (MCP) Gateway that aggregates multiple MCP se
 1. **Tool Overload** - Loading 300+ tool definitions consumes 77,000+ context tokens before any work begins
 2. **Result Bloat** - Large query results (10K rows) can consume 50,000+ tokens per call
 
-**Solution:** MCP Gateway aggregates all your MCP servers and provides **10 layers of token optimization**:
+**Solution:** MCP Gateway aggregates all your MCP servers and provides **12 layers of token optimization**:
 
 | Layer | What It Does | Token Savings |
 |-------|--------------|---------------|
@@ -26,17 +26,19 @@ A universal Model Context Protocol (MCP) Gateway that aggregates multiple MCP se
 | **Skills** | Zero-shot task execution | **95%+** |
 | Caching | Skip repeated queries | 100% |
 | PII Tokenization | Redact sensitive data | Security |
-| **Response Optimization** | Strip null/empty values | 20-40% |
-| **Session Context** | Avoid resending data in context | Very High |
-| **Schema Deduplication** | Reference identical schemas by hash | Up to 90% |
+| Response Optimization | Strip null/empty values | 20-40% |
+| Session Context | Avoid resending data in context | Very High |
+| Schema Deduplication | Reference identical schemas by hash | Up to 90% |
+| **Micro-Schema Mode** | Ultra-compact type abbreviations | **60-70%** |
+| **Delta Responses** | Send only changes for repeated queries | **90%+** |
 
 **Result:** A typical session drops from ~500,000 tokens to ~25,000 tokens (95% reduction).
 
-### 305 Tools Through 15 Gateway Tools
+### 305 Tools Through 16 Gateway Tools
 
 ![Cursor showing gateway tools providing access to 305 MCP tools](screenshots/gateway-tools-claude-desktop.png)
 
-*Cursor connected to MCP Gateway - 15 tools provide access to 305 backend tools across 16 servers*
+*Cursor connected to MCP Gateway - 16 tools provide access to 305 backend tools across 16 servers*
 
 ### Minimal Context Usage
 
@@ -83,6 +85,8 @@ Inspired by [Anthropic's Code Execution with MCP](https://www.anthropic.com/engi
 - 🧹 **Response Optimization** - Automatically strip null/empty values from responses (20-40% reduction)
 - 🧠 **Session Context** - Track sent data to avoid resending in multi-turn conversations
 - 🔗 **Schema Deduplication** - Reference identical schemas by hash (up to 90% reduction)
+- 📐 **Micro-Schema Mode** - Ultra-compact schemas with abbreviated types (60-70% reduction)
+- 🔄 **Delta Responses** - Send only changes for repeated queries (90%+ reduction)
 
 ### Monitoring & Observability
 - 📈 **Prometheus Metrics** - Tool call latency, error rates, cache performance
@@ -579,7 +583,7 @@ Total: ~150 tokens, 1 round-trip, 2 seconds
 
 ### Gateway MCP Tools
 
-All code execution features are exposed as MCP tools that any client can use directly. When connected to the gateway, clients automatically get these **15 tools** instead of 300+ raw tool definitions:
+All code execution features are exposed as MCP tools that any client can use directly. When connected to the gateway, clients automatically get these **16 tools** instead of 300+ raw tool definitions:
 
 #### Tool Discovery (Progressive Disclosure)
 
@@ -612,11 +616,12 @@ All code execution features are exposed as MCP tools that any client can use dir
 | `gateway_execute_skill` | Execute a saved skill | **~20 tokens per call** |
 | `gateway_create_skill` | Save a new reusable skill | One-time investment |
 
-#### Optimization Stats
+#### Optimization & Monitoring
 
 | Tool | Purpose | Token Impact |
 |------|---------|--------------|
 | `gateway_get_optimization_stats` | View token savings statistics | Monitor efficiency |
+| `gateway_call_tool_delta` | Call tool with delta response - only changes | **90%+ for repeated queries** |
 
 ### Progressive Tool Disclosure
 
@@ -999,6 +1004,53 @@ await gateway_get_optimization_stats();
 // Returns: { schemaDeduplication: { uniqueSchemas: 45, totalSchemas: 305, duplicateSchemas: 260 } }
 ```
 
+### Layer 11: Micro-Schema Mode (60-70% Reduction)
+
+Ultra-compact schema representation using abbreviated types:
+
+```javascript
+// Full schema (~200 tokens):
+{ type: "object", properties: { query: { type: "string", description: "SQL query" }, limit: { type: "number" } }, required: ["query"] }
+
+// Micro schema (~60 tokens):
+{ p: { query: { t: "s", r: 1 }, limit: { t: "n" } } }
+
+// Use micro mode for maximum savings
+await gateway_search_tools({ query: "database", detailLevel: "micro_schema" });
+await gateway_get_tool_schema({ toolName: "db_query", mode: "micro" });
+
+// Type abbreviations: s=string, n=number, i=integer, b=boolean, a=array, o=object
+// r=1 means required, e=enum values, d=default value
+```
+
+### Layer 12: Delta Responses (90%+ Reduction)
+
+For repeated queries or polling, send only changes since last call:
+
+```javascript
+// First call - returns full data
+await gateway_call_tool_delta({
+  toolName: "database_query",
+  args: { query: "SELECT * FROM active_users" },
+  idField: "id"  // Optional: use ID for smarter diffing
+});
+// Returns: { isDelta: false, data: [...1000 users...], stateHash: "abc123" }
+
+// Second call - returns only changes
+await gateway_call_tool_delta({
+  toolName: "database_query",
+  args: { query: "SELECT * FROM active_users" },
+  idField: "id"
+});
+// Returns: { isDelta: true, data: { type: "diff", added: [2 new], updated: {"5": {...}}, removed: ["3"] }, stats: { savedPercent: 95 } }
+
+// Perfect for:
+// - Dashboard refreshes
+// - Monitoring queries
+// - Real-time data feeds
+// - Polling scenarios
+```
+
 ### Combined Token Savings
 
 | Layer | Feature | Typical Savings |
@@ -1013,6 +1065,8 @@ await gateway_get_optimization_stats();
 | 8 | Response Optimization | 20-40% on all responses |
 | 9 | Session Context | Very high on multi-turn |
 | 10 | Schema Deduplication | Up to 90% on similar tools |
+| 11 | Micro-Schema Mode | 60-70% on schema definitions |
+| 12 | Delta Responses | 90%+ on repeated/polling queries |
 
 **Real-world impact:** A typical 10-minute agent session with 50 tool calls drops from ~500,000 tokens to ~25,000 tokens.
 

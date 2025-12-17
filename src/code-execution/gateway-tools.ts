@@ -16,6 +16,7 @@ import { getPIITokenizerForSession } from './pii-tokenizer.js';
 import { optimizeApiResponse } from './response-optimizer.js';
 import { getSessionContext, sessionContextManager } from './session-context.js';
 import { SchemaDeduplicator } from './schema-dedup.js';
+import { getDeltaManager, DeltaResponseManager } from './delta-response.js';
 
 /**
  * Estimate tokens for a given object (roughly 4 chars per token)
@@ -152,8 +153,8 @@ export function createGatewayTools(
         },
         detailLevel: {
           type: 'string',
-          enum: ['name_only', 'name_description', 'compact_schema', 'full_schema'],
-          description: 'Level of detail. Use name_only for minimal tokens, compact_schema for types without descriptions.',
+          enum: ['name_only', 'name_description', 'compact_schema', 'full_schema', 'micro_schema'],
+          description: 'Level of detail. Use name_only for minimal tokens, micro_schema for ultra-compact (60-70% savings).',
           default: 'name_description',
         },
         includeExamples: {
@@ -176,7 +177,7 @@ export function createGatewayTools(
 
   tools.push({
     name: `${prefix}_get_tool_schema`,
-    description: 'Get the JSON schema for a specific tool. Use compact=true to save ~40% tokens.',
+    description: 'Get the JSON schema for a specific tool. Use compact=true for ~40% savings, or mode="micro" for ~60-70% savings.',
     inputSchema: {
       type: 'object',
       properties: {
@@ -189,12 +190,18 @@ export function createGatewayTools(
           description: 'If true, returns schema with types only (no descriptions). Saves ~40% tokens.',
           default: false,
         },
+        mode: {
+          type: 'string',
+          enum: ['full', 'compact', 'micro'],
+          description: 'Schema mode: full (default), compact (~40% savings), micro (~60-70% savings with abbreviated types)',
+        },
       },
       required: ['toolName'],
     },
     inputExamples: [
+      { toolName: 'mssql_prod_execute_query', mode: 'micro' },
       { toolName: 'mssql_prod_execute_query', compact: true },
-      { toolName: 'filesystem_read_file', compact: false },
+      { toolName: 'filesystem_read_file' },
     ],
   });
 
@@ -214,10 +221,16 @@ export function createGatewayTools(
           description: 'If true, returns schemas with types only (no descriptions). Saves ~40% tokens.',
           default: false,
         },
+        mode: {
+          type: 'string',
+          enum: ['full', 'compact', 'micro'],
+          description: 'Schema mode: full (default), compact (~40% savings), micro (~60-70% savings)',
+        },
       },
       required: ['toolNames'],
     },
     inputExamples: [
+      { toolNames: ['mssql_prod_execute_query', 'mssql_prod_get_schema'], mode: 'micro' },
       { toolNames: ['mssql_prod_execute_query', 'mssql_prod_get_schema'], compact: true },
     ],
   });
@@ -585,12 +598,42 @@ export function createGatewayTools(
     ],
   });
 
+  // ==================== Delta Response Tool ====================
+
+  tools.push({
+    name: `${prefix}_call_tool_delta`,
+    description: 'Call a tool with delta response - only returns changes since last call. Saves 90%+ tokens for repeated/polling queries.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        toolName: {
+          type: 'string',
+          description: 'Name of the tool to call',
+        },
+        args: {
+          type: 'object',
+          description: 'Arguments to pass to the tool',
+        },
+        idField: {
+          type: 'string',
+          description: 'For array results, the field to use as unique ID for smarter diffing (e.g., "id", "userId")',
+        },
+      },
+      required: ['toolName'],
+    },
+    inputExamples: [
+      { toolName: 'database_query', args: { query: 'SELECT * FROM users WHERE active = 1' }, idField: 'id' },
+      { toolName: 'monitoring_get_status', args: {} },
+    ],
+  });
+
   // ==================== Tool Call Handler ====================
 
   async function callTool(name: string, args: unknown, ctx?: { sessionId?: string }): Promise<unknown> {
     const params = (args || {}) as Record<string, unknown>;
     const tokenizer = getPIITokenizerForSession(ctx?.sessionId);
     const sessionContext = getSessionContext(ctx?.sessionId);
+    const deltaManager = getDeltaManager(ctx?.sessionId);
 
     // Optimization Stats
     if (name === `${prefix}_get_optimization_stats`) {
@@ -665,7 +708,11 @@ export function createGatewayTools(
     if (name === `${prefix}_get_tool_schema`) {
       const toolName = params.toolName as string;
       const compact = params.compact as boolean | undefined;
-      const schema = toolDiscovery.getToolSchema(toolName, compact);
+      const mode = params.mode as 'full' | 'compact' | 'micro' | undefined;
+      // Prefer mode if specified, otherwise fall back to compact boolean
+      // 'full' mode is equivalent to false (default)
+      const schemaMode = mode === 'full' ? false : (mode || (compact ? 'compact' : false));
+      const schema = toolDiscovery.getToolSchema(toolName, schemaMode);
       if (!schema) {
         return { error: `Tool '${toolName}' not found` };
       }
@@ -675,10 +722,14 @@ export function createGatewayTools(
     if (name === `${prefix}_get_tool_schemas`) {
       const toolNames = params.toolNames as string[];
       const compact = params.compact as boolean | undefined;
+      const mode = params.mode as 'full' | 'compact' | 'micro' | undefined;
+      // Prefer mode if specified, otherwise fall back to compact boolean
+      // 'full' mode is equivalent to false (default)
+      const schemaMode = mode === 'full' ? false : (mode || (compact ? 'compact' : false));
 
       // Limit to 20 tools per request
       const limitedNames = toolNames.slice(0, 20);
-      const result = toolDiscovery.getToolSchemas(limitedNames, compact);
+      const result = toolDiscovery.getToolSchemas(limitedNames, schemaMode);
 
       return {
         tools: result.tools,
@@ -899,6 +950,56 @@ export function createGatewayTools(
         tags: (params.tags as string[]) || [],
       });
       return { success: true, skill };
+    }
+
+    // Delta Response Tool
+    if (name === `${prefix}_call_tool_delta`) {
+      const toolName = params.toolName as string;
+      const toolArgs = params.args as Record<string, unknown> || {};
+      const idField = params.idField as string | undefined;
+
+      // Check if tool is allowed
+      if (!isProgrammaticToolAllowed(toolName)) {
+        return { error: `Tool '${toolName}' is not in the allowed list for programmatic access` };
+      }
+
+      // Find the backend and execute the tool
+      const backendId = backendManager.getBackendForTool(toolName);
+      if (!backendId) {
+        return { error: `Tool '${toolName}' not found` };
+      }
+
+      const result = await backendManager.callTool(toolName, toolArgs);
+
+      // Extract the actual data from the result
+      let data: unknown;
+      if (result && typeof result === 'object' && 'content' in result) {
+        const content = (result as { content: Array<{ type: string; text?: string }> }).content;
+        if (Array.isArray(content) && content.length > 0 && content[0].text) {
+          try {
+            data = JSON.parse(content[0].text);
+          } catch {
+            data = content[0].text;
+          }
+        } else {
+          data = result;
+        }
+      } else {
+        data = result;
+      }
+
+      // Generate delta key
+      const deltaKey = DeltaResponseManager.generateKey(toolName, toolArgs);
+
+      // Get delta response based on data type
+      if (Array.isArray(data)) {
+        return deltaManager.getDeltaForArray(deltaKey, data, idField);
+      } else if (typeof data === 'object' && data !== null) {
+        return deltaManager.getDeltaForObject(deltaKey, data as Record<string, unknown>);
+      }
+
+      // For primitive types, just return as-is
+      return { isDelta: false, data, stateHash: '' };
     }
 
     return { error: `Unknown gateway tool: ${name}` };
