@@ -17,6 +17,9 @@ import { optimizeApiResponse } from './response-optimizer.js';
 import { getSessionContext, sessionContextManager } from './session-context.js';
 import { SchemaDeduplicator } from './schema-dedup.js';
 import { getDeltaManager, DeltaResponseManager } from './delta-response.js';
+import { getContextTracker } from './context-tracker.js';
+import { summarizeResponse } from './response-summarizer.js';
+import { analyzeCode, getQueryPlanSummary } from './query-planner.js';
 
 /**
  * Estimate tokens for a given object (roughly 4 chars per token)
@@ -627,6 +630,80 @@ export function createGatewayTools(
     ],
   });
 
+  // ==================== Context Tracking Tool ====================
+
+  tools.push({
+    name: `${prefix}_get_context_status`,
+    description: 'Get context window usage status including tokens used, warnings, and recommendations. Use this to monitor context and prevent overflow.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        contextLimit: {
+          type: 'number',
+          description: 'Override context limit (default: 128000 for Claude)',
+        },
+      },
+    },
+    inputExamples: [
+      {},
+      { contextLimit: 200000 },
+    ],
+  });
+
+  // ==================== Response Summarization Tool ====================
+
+  tools.push({
+    name: `${prefix}_call_tool_summarized`,
+    description: 'Call a tool and auto-summarize large results. Extracts key insights, statistics, and sample data. Saves 60-90% tokens on large datasets.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        toolName: {
+          type: 'string',
+          description: 'Name of the tool to call',
+        },
+        args: {
+          type: 'object',
+          description: 'Arguments to pass to the tool',
+        },
+        maxTokens: {
+          type: 'number',
+          description: 'Maximum tokens for the summary (default: 500)',
+        },
+        focusFields: {
+          type: 'array',
+          items: { type: 'string' },
+          description: 'Fields to focus analysis on',
+        },
+      },
+      required: ['toolName'],
+    },
+    inputExamples: [
+      { toolName: 'database_query', args: { query: 'SELECT * FROM orders' }, maxTokens: 300 },
+      { toolName: 'api_fetch', args: { url: '/users' }, focusFields: ['status', 'role'] },
+    ],
+  });
+
+  // ==================== Query Planning Tool ====================
+
+  tools.push({
+    name: `${prefix}_analyze_code`,
+    description: 'Analyze code before execution to detect optimization opportunities like parallelization, redundant calls, and missing filters.',
+    inputSchema: {
+      type: 'object',
+      properties: {
+        code: {
+          type: 'string',
+          description: 'The code to analyze',
+        },
+      },
+      required: ['code'],
+    },
+    inputExamples: [
+      { code: 'const users = await db.query("SELECT * FROM users");\nconst orders = await db.query("SELECT * FROM orders");' },
+    ],
+  });
+
   // ==================== Tool Call Handler ====================
 
   async function callTool(name: string, args: unknown, ctx?: { sessionId?: string }): Promise<unknown> {
@@ -634,6 +711,7 @@ export function createGatewayTools(
     const tokenizer = getPIITokenizerForSession(ctx?.sessionId);
     const sessionContext = getSessionContext(ctx?.sessionId);
     const deltaManager = getDeltaManager(ctx?.sessionId);
+    const contextTracker = getContextTracker(ctx?.sessionId);
 
     // Optimization Stats
     if (name === `${prefix}_get_optimization_stats`) {
@@ -1000,6 +1078,78 @@ export function createGatewayTools(
 
       // For primitive types, just return as-is
       return { isDelta: false, data, stateHash: '' };
+    }
+
+    // Context Status Tool
+    if (name === `${prefix}_get_context_status`) {
+      const contextLimit = params.contextLimit as number | undefined;
+      if (contextLimit) {
+        contextTracker.setContextLimit(contextLimit);
+      }
+      return contextTracker.getStatus();
+    }
+
+    // Summarized Tool Call
+    if (name === `${prefix}_call_tool_summarized`) {
+      const toolName = params.toolName as string;
+      const toolArgs = params.args as Record<string, unknown> || {};
+      const maxTokens = params.maxTokens as number | undefined;
+      const focusFields = params.focusFields as string[] | undefined;
+
+      // Check if tool is allowed
+      if (!isProgrammaticToolAllowed(toolName)) {
+        return { error: `Tool '${toolName}' is not in the allowed list for programmatic access` };
+      }
+
+      // Find the backend and execute the tool
+      const backendId = backendManager.getBackendForTool(toolName);
+      if (!backendId) {
+        return { error: `Tool '${toolName}' not found` };
+      }
+
+      const result = await backendManager.callTool(toolName, toolArgs);
+
+      // Extract the actual data from the result
+      let data: unknown;
+      if (result && typeof result === 'object' && 'content' in result) {
+        const content = (result as { content: Array<{ type: string; text?: string }> }).content;
+        if (Array.isArray(content) && content.length > 0 && content[0].text) {
+          try {
+            data = JSON.parse(content[0].text);
+          } catch {
+            data = content[0].text;
+          }
+        } else {
+          data = result;
+        }
+      } else {
+        data = result;
+      }
+
+      // Track the result
+      contextTracker.trackResult(toolName, data);
+
+      // Summarize the response
+      const summarized = summarizeResponse(data, {
+        maxTokens: maxTokens || 500,
+        focusFields,
+      });
+
+      return summarized;
+    }
+
+    // Code Analysis Tool
+    if (name === `${prefix}_analyze_code`) {
+      const code = params.code as string;
+      if (!code) {
+        return { error: 'Code parameter is required' };
+      }
+
+      const plan = analyzeCode(code);
+      return {
+        ...plan,
+        summary: getQueryPlanSummary(plan),
+      };
     }
 
     return { error: `Unknown gateway tool: ${name}` };

@@ -72,3 +72,30 @@ export {
   type DeltaResult,
   type DeltaPatch,
 } from './delta-response.js';
+
+// Context Window Tracking (Layer 13)
+export {
+  ContextTracker,
+  getContextTracker,
+  clearContextTracker,
+  getAggregateContextStats,
+  type ContextUsage,
+} from './context-tracker.js';
+
+// Response Summarization (Layer 14)
+export {
+  summarizeResponse,
+  autoSummarize,
+  createTextSummary,
+  type SummarizeOptions,
+  type SummaryResult,
+} from './response-summarizer.js';
+
+// Query Planning (Layer 15)
+export {
+  analyzeCode,
+  hasOptimizationOpportunities,
+  getQueryPlanSummary,
+  type QueryPlan,
+  type OptimizationSuggestion,
+} from './query-planner.js';

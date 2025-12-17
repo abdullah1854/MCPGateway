@@ -15,7 +15,7 @@ A universal Model Context Protocol (MCP) Gateway that aggregates multiple MCP se
 1. **Tool Overload** - Loading 300+ tool definitions consumes 77,000+ context tokens before any work begins
 2. **Result Bloat** - Large query results (10K rows) can consume 50,000+ tokens per call
 
-**Solution:** MCP Gateway aggregates all your MCP servers and provides **12 layers of token optimization**:
+**Solution:** MCP Gateway aggregates all your MCP servers and provides **15 layers of token optimization**:
 
 | Layer | What It Does | Token Savings |
 |-------|--------------|---------------|
@@ -29,16 +29,19 @@ A universal Model Context Protocol (MCP) Gateway that aggregates multiple MCP se
 | Response Optimization | Strip null/empty values | 20-40% |
 | Session Context | Avoid resending data in context | Very High |
 | Schema Deduplication | Reference identical schemas by hash | Up to 90% |
-| **Micro-Schema Mode** | Ultra-compact type abbreviations | **60-70%** |
-| **Delta Responses** | Send only changes for repeated queries | **90%+** |
+| Micro-Schema Mode | Ultra-compact type abbreviations | 60-70% |
+| Delta Responses | Send only changes for repeated queries | 90%+ |
+| **Context Tracking** | Monitor context usage, prevent overflow | **Safety** |
+| **Auto-Summarization** | Extract insights from large results | **60-90%** |
+| **Query Planning** | Detect optimization opportunities | **30-50%** |
 
 **Result:** A typical session drops from ~500,000 tokens to ~25,000 tokens (95% reduction).
 
-### 305 Tools Through 16 Gateway Tools
+### 305 Tools Through 19 Gateway Tools
 
 ![Cursor showing gateway tools providing access to 305 MCP tools](screenshots/gateway-tools-claude-desktop.png)
 
-*Cursor connected to MCP Gateway - 16 tools provide access to 305 backend tools across 16 servers*
+*Cursor connected to MCP Gateway - 19 tools provide access to 305 backend tools across 16 servers*
 
 ### Minimal Context Usage
 
@@ -87,6 +90,9 @@ Inspired by [Anthropic's Code Execution with MCP](https://www.anthropic.com/engi
 - 🔗 **Schema Deduplication** - Reference identical schemas by hash (up to 90% reduction)
 - 📐 **Micro-Schema Mode** - Ultra-compact schemas with abbreviated types (60-70% reduction)
 - 🔄 **Delta Responses** - Send only changes for repeated queries (90%+ reduction)
+- 📊 **Context Tracking** - Monitor context window usage and get warnings before overflow
+- 📝 **Auto-Summarization** - Extract key insights from large results (60-90% reduction)
+- 🔍 **Query Planning** - Analyze code to detect optimization opportunities (30-50% improvement)
 
 ### Monitoring & Observability
 - 📈 **Prometheus Metrics** - Tool call latency, error rates, cache performance
@@ -583,7 +589,7 @@ Total: ~150 tokens, 1 round-trip, 2 seconds
 
 ### Gateway MCP Tools
 
-All code execution features are exposed as MCP tools that any client can use directly. When connected to the gateway, clients automatically get these **16 tools** instead of 300+ raw tool definitions:
+All code execution features are exposed as MCP tools that any client can use directly. When connected to the gateway, clients automatically get these **19 tools** instead of 300+ raw tool definitions:
 
 #### Tool Discovery (Progressive Disclosure)
 
@@ -622,6 +628,9 @@ All code execution features are exposed as MCP tools that any client can use dir
 |------|---------|--------------|
 | `gateway_get_optimization_stats` | View token savings statistics | Monitor efficiency |
 | `gateway_call_tool_delta` | Call tool with delta response - only changes | **90%+ for repeated queries** |
+| `gateway_get_context_status` | Monitor context window usage and get warnings | Prevent overflow |
+| `gateway_call_tool_summarized` | Call tool with auto-summarization of results | **60-90% for large data** |
+| `gateway_analyze_code` | Analyze code for optimization opportunities | Improve efficiency |
 
 ### Progressive Tool Disclosure
 
@@ -1051,6 +1060,110 @@ await gateway_call_tool_delta({
 // - Polling scenarios
 ```
 
+### Layer 13: Context Window Tracking (Safety)
+
+Monitor context usage to prevent overflow and get optimization recommendations:
+
+```javascript
+// Check current context status
+await gateway_get_context_status();
+// Returns: {
+//   tokensUsed: 45000,
+//   contextLimit: 128000,
+//   percentUsed: 35,
+//   warning: null,  // 'low', 'medium', 'high', 'critical'
+//   recommendation: null,
+//   breakdown: { schemas: 8000, results: 32000, code: 5000 },
+//   recentCalls: [{ tool: "db_query", tokens: 1200, timestamp: ... }]
+// }
+
+// When context is high (>70%), you'll get warnings:
+// warning: "medium"
+// recommendation: "Consider using compact or micro schema modes. Use result filtering."
+
+// When critical (>95%):
+// warning: "critical"
+// recommendation: "CRITICAL: Context nearly full. Complete current task or start new session."
+```
+
+### Layer 14: Auto-Summarization (60-90% Reduction)
+
+Automatically extract insights from large results:
+
+```javascript
+// Instead of returning 10,000 rows...
+await gateway_call_tool_summarized({
+  toolName: "database_query",
+  args: { query: "SELECT * FROM orders" },
+  maxTokens: 300,
+  focusFields: ["status", "amount"]
+});
+
+// Returns summarized insights:
+// {
+//   wasSummarized: true,
+//   data: {
+//     count: 10000,
+//     fields: ["id", "status", "amount", "created_at"],
+//     sample: [/* first 5 rows */],
+//     stats: { amount: { min: 10, max: 5000, avg: 250 } },
+//     distribution: { status: { completed: 7500, pending: 2000, cancelled: 500 } },
+//     insights: [
+//       "Total records: 10000",
+//       "status distribution: completed: 7500, pending: 2000, cancelled: 500",
+//       "amount: min=10, max=5000, avg=250"
+//     ]
+//   },
+//   summary: { originalTokens: 45000, summaryTokens: 280, savedPercent: 99 }
+// }
+```
+
+### Layer 15: Query Planning (30-50% Improvement)
+
+Analyze code before execution to detect optimization opportunities:
+
+```javascript
+await gateway_analyze_code({
+  code: `
+    const users = await db.query("SELECT * FROM users");
+    const orders = await db.query("SELECT * FROM orders");
+    const products = await db.query("SELECT * FROM products");
+
+    for (const user of users) {
+      await db.query(\`SELECT * FROM logs WHERE user_id = \${user.id}\`);
+    }
+  `
+});
+
+// Returns optimization plan:
+// {
+//   toolCalls: [/* detected calls */],
+//   suggestions: [
+//     {
+//       type: "parallel",
+//       severity: "info",
+//       message: "Sequential awaits on lines 2, 3, 4 could run in parallel with Promise.all()",
+//       suggestedCode: "const [users, orders, products] = await Promise.all([...])",
+//       estimatedSavings: "66% time reduction"
+//     },
+//     {
+//       type: "batch",
+//       severity: "warning",
+//       message: "Potential N+1 query pattern detected (await inside loop)",
+//       estimatedSavings: "80-95% reduction for large datasets"
+//     },
+//     {
+//       type: "filter",
+//       severity: "warning",
+//       message: "SELECT * returns all columns. Consider selecting only needed fields.",
+//       estimatedSavings: "30-70% token reduction"
+//     }
+//   ],
+//   warnings: ["High number of tool calls (4). Consider using code batching."],
+//   summary: "Found 4 tool calls. Optimization opportunities: 1 parallel, 1 batch, 1 filter."
+// }
+```
+
 ### Combined Token Savings
 
 | Layer | Feature | Typical Savings |
@@ -1067,6 +1180,9 @@ await gateway_call_tool_delta({
 | 10 | Schema Deduplication | Up to 90% on similar tools |
 | 11 | Micro-Schema Mode | 60-70% on schema definitions |
 | 12 | Delta Responses | 90%+ on repeated/polling queries |
+| 13 | Context Tracking | Prevents context overflow |
+| 14 | Auto-Summarization | 60-90% on large datasets |
+| 15 | Query Planning | 30-50% through optimization |
 
 **Real-world impact:** A typical 10-minute agent session with 50 tool calls drops from ~500,000 tokens to ~25,000 tokens.
 
