@@ -73,7 +73,7 @@ Inspired by [Anthropic's Code Execution with MCP](https://www.anthropic.com/engi
 ## Screenshots
 
 ### Dashboard Overview
-![Dashboard Main View](screenshots/dashboard-main.png)
+![Dashboard Main View](screenshots/dashboard_v2.png)
 
 ### Tools Management
 ![Expanded Tools View](screenshots/dashboard-expanded-tools.png)
@@ -501,6 +501,16 @@ Response:
 ## Code Execution Mode
 
 The Code Execution Mode allows AI agents to write and execute code instead of making individual tool calls, achieving up to **98.7% token reduction** for complex workflows.
+
+### Why Skills? (Efficiency & Token Usage)
+
+Using Skills in MCP Gateway significantly reduces token usage and improves efficiency:
+
+1.  **Zero-Shot Execution** - Instead of sending a long prompt describing *how* to do a task (e.g., specific SQL queries, table schemas), you simply execute a named skill. This saves hundreds or thousands of input tokens per request.
+2.  **Deterministic Results** - Skills are pre-written, tested code. You avoid the risk of the LLM generating invalid code or Hallucinating syntax.
+3.  **Low Latency** - Passing a skill name is faster than generating and validating new code blocks.
+4.  **Reusability** - Complex multi-step logic (e.g., "Fetch users, filter by active status, and aggregate by region") becomes a single tool call.
+
 
 ### Gateway MCP Tools
 
