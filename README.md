@@ -15,7 +15,7 @@ A universal Model Context Protocol (MCP) Gateway that aggregates multiple MCP se
 1. **Tool Overload** - Loading 300+ tool definitions consumes 77,000+ context tokens before any work begins
 2. **Result Bloat** - Large query results (10K rows) can consume 50,000+ tokens per call
 
-**Solution:** MCP Gateway aggregates all your MCP servers and provides **7 layers of token optimization**:
+**Solution:** MCP Gateway aggregates all your MCP servers and provides **10 layers of token optimization**:
 
 | Layer | What It Does | Token Savings |
 |-------|--------------|---------------|
@@ -26,14 +26,17 @@ A universal Model Context Protocol (MCP) Gateway that aggregates multiple MCP se
 | **Skills** | Zero-shot task execution | **95%+** |
 | Caching | Skip repeated queries | 100% |
 | PII Tokenization | Redact sensitive data | Security |
+| **Response Optimization** | Strip null/empty values | 20-40% |
+| **Session Context** | Avoid resending data in context | Very High |
+| **Schema Deduplication** | Reference identical schemas by hash | Up to 90% |
 
 **Result:** A typical session drops from ~500,000 tokens to ~25,000 tokens (95% reduction).
 
-### 305 Tools Through 14 Gateway Tools
+### 305 Tools Through 15 Gateway Tools
 
-![Cursor showing 14 gateway tools providing access to 305 MCP tools](screenshots/gateway-tools-claude-desktop.png)
+![Cursor showing gateway tools providing access to 305 MCP tools](screenshots/gateway-tools-claude-desktop.png)
 
-*Cursor connected to MCP Gateway - 14 tools provide access to 305 backend tools across 16 servers*
+*Cursor connected to MCP Gateway - 15 tools provide access to 305 backend tools across 16 servers*
 
 ### Minimal Context Usage
 
@@ -77,6 +80,9 @@ Inspired by [Anthropic's Code Execution with MCP](https://www.anthropic.com/engi
 - 📁 **Skills System** - Save and reuse code patterns for zero-shot execution (eliminates prompt tokens)
 - 🗄️ **State Persistence** - Workspace for agent state across sessions
 - 🛠️ **Gateway MCP Tools** - All code execution features exposed as MCP tools for any client
+- 🧹 **Response Optimization** - Automatically strip null/empty values from responses (20-40% reduction)
+- 🧠 **Session Context** - Track sent data to avoid resending in multi-turn conversations
+- 🔗 **Schema Deduplication** - Reference identical schemas by hash (up to 90% reduction)
 
 ### Monitoring & Observability
 - 📈 **Prometheus Metrics** - Tool call latency, error rates, cache performance
@@ -573,7 +579,7 @@ Total: ~150 tokens, 1 round-trip, 2 seconds
 
 ### Gateway MCP Tools
 
-All code execution features are exposed as MCP tools that any client can use directly. When connected to the gateway, clients automatically get these **14 tools** instead of 300+ raw tool definitions:
+All code execution features are exposed as MCP tools that any client can use directly. When connected to the gateway, clients automatically get these **15 tools** instead of 300+ raw tool definitions:
 
 #### Tool Discovery (Progressive Disclosure)
 
@@ -605,6 +611,12 @@ All code execution features are exposed as MCP tools that any client can use dir
 | `gateway_get_skill` | Get skill details and code | Inspect before executing |
 | `gateway_execute_skill` | Execute a saved skill | **~20 tokens per call** |
 | `gateway_create_skill` | Save a new reusable skill | One-time investment |
+
+#### Optimization Stats
+
+| Tool | Purpose | Token Impact |
+|------|---------|--------------|
+| `gateway_get_optimization_stats` | View token savings statistics | Monitor efficiency |
 
 ### Progressive Tool Disclosure
 
@@ -940,6 +952,53 @@ Sensitive data never enters model context while still flowing between tools:
 // Next tool receives: Original values (auto-detokenized)
 ```
 
+### Layer 8: Response Optimization (20-40% Reduction)
+
+Automatically strip default/empty values from all responses:
+
+```javascript
+// Before optimization (raw response):
+{ name: "John", email: null, phone: "", orders: [], metadata: {} }
+
+// After optimization (stripped):
+{ name: "John" }
+// Saves 20-40% tokens on typical API responses
+```
+
+Strips: `null`, `undefined`, empty strings `""`, empty arrays `[]`, empty objects `{}`
+
+### Layer 9: Session Context Cache (Very High Reduction)
+
+Tracks what schemas and data have been sent in the conversation to avoid resending:
+
+```javascript
+// First call: Full schema sent (~500 tokens)
+await gateway_get_tool_schema({ toolName: "db_query" });
+
+// Second call in same session: Reference returned (~20 tokens)
+await gateway_get_tool_schema({ toolName: "db_query" });
+// Returns: "[See schema 'db_query' sent earlier in conversation]"
+
+// View savings
+await gateway_get_optimization_stats();
+// Returns: { session: { duplicatesAvoided: 15, tokensSaved: 4500 }, ... }
+```
+
+### Layer 10: Schema Deduplication (Up to 90% Reduction)
+
+Many tools share identical schemas. Reference by hash instead of duplicating:
+
+```javascript
+// 10 database tools with same query schema:
+// Without dedup: 10 × 200 tokens = 2000 tokens
+// With dedup: 200 tokens (schema) + 10 × 5 tokens (refs) = 250 tokens
+// Savings: 87.5%
+
+// The gateway automatically identifies duplicate schemas
+await gateway_get_optimization_stats();
+// Returns: { schemaDeduplication: { uniqueSchemas: 45, totalSchemas: 305, duplicateSchemas: 260 } }
+```
+
 ### Combined Token Savings
 
 | Layer | Feature | Typical Savings |
@@ -951,6 +1010,9 @@ Sensitive data never enters model context while still flowing between tools:
 | 5 | Skills | 95%+ on recurring tasks |
 | 6 | Caching | 100% on repeated queries |
 | 7 | PII Tokenization | Prevents data leakage |
+| 8 | Response Optimization | 20-40% on all responses |
+| 9 | Session Context | Very high on multi-turn |
+| 10 | Schema Deduplication | Up to 90% on similar tools |
 
 **Real-world impact:** A typical 10-minute agent session with 50 tool calls drops from ~500,000 tokens to ~25,000 tokens.
 

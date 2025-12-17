@@ -1,3 +1,6 @@
+# Claude project context (local only)
+.claude-project.md
+
 # Dependencies
 node_modules/
 

@@ -10,6 +10,9 @@
  * 5. PII Tokenization - privacy-preserving data operations
  * 6. State Persistence & Skills - save and reuse code patterns
  * 7. Result Caching - reduce redundant tool calls
+ * 8. Response Optimization - strip default/empty values
+ * 9. Session Context - avoid resending data in context
+ * 10. Schema Deduplication - reference identical schemas by hash
  */
 
 export { ToolDiscovery, type ToolSearchOptions, type ToolSearchResult } from './tool-discovery.js';
@@ -30,3 +33,30 @@ export { SkillsManager, type Skill, type SkillInput, type SkillExecutionResult }
 
 // Result Caching
 export { ResultCache, withCache, type CacheEntry, type CacheStats } from './cache.js';
+
+// Response Optimization (Layer 8)
+export {
+  optimizeResponse,
+  optimizeApiResponse,
+  optimizeToolSchema,
+  calculateSavings,
+  optimizeWithStats,
+  type OptimizeOptions,
+} from './response-optimizer.js';
+
+// Session Context Cache (Layer 9)
+export {
+  SessionContext,
+  getSessionContext,
+  sessionContextManager,
+  type SessionContextStats,
+} from './session-context.js';
+
+// Schema Deduplication (Layer 10)
+export {
+  SchemaDeduplicator,
+  globalSchemaDeduplicator,
+  createCompactToolList,
+  type SchemaRegistry,
+  type DedupStats,
+} from './schema-dedup.js';

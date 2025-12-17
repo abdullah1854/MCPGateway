@@ -13,6 +13,9 @@ import { SkillsManager } from './skills.js';
 import { WorkspaceManager } from './workspace.js';
 import { Aggregations } from './streaming.js';
 import { getPIITokenizerForSession } from './pii-tokenizer.js';
+import { optimizeApiResponse } from './response-optimizer.js';
+import { getSessionContext, sessionContextManager } from './session-context.js';
+import { SchemaDeduplicator } from './schema-dedup.js';
 
 /**
  * Estimate tokens for a given object (roughly 4 chars per token)
@@ -72,6 +75,7 @@ export function createGatewayTools(
   const codeExecutor = new CodeExecutor(backendManager);
   const workspaceManager = new WorkspaceManager();
   const skillsManager = new SkillsManager(workspaceManager, codeExecutor);
+  const schemaDeduplicator = new SchemaDeduplicator();
 
   const tools: GatewayTool[] = [];
 
@@ -567,11 +571,53 @@ export function createGatewayTools(
     });
   }
 
+  // ==================== Optimization Stats Tool ====================
+
+  tools.push({
+    name: `${prefix}_get_optimization_stats`,
+    description: 'Get token optimization statistics for the current session including cache hits, duplicates avoided, and estimated savings.',
+    inputSchema: {
+      type: 'object',
+      properties: {},
+    },
+    inputExamples: [
+      {},
+    ],
+  });
+
   // ==================== Tool Call Handler ====================
 
   async function callTool(name: string, args: unknown, ctx?: { sessionId?: string }): Promise<unknown> {
     const params = (args || {}) as Record<string, unknown>;
     const tokenizer = getPIITokenizerForSession(ctx?.sessionId);
+    const sessionContext = getSessionContext(ctx?.sessionId);
+
+    // Optimization Stats
+    if (name === `${prefix}_get_optimization_stats`) {
+      const sessionStats = sessionContext.getStats();
+      const aggregateStats = sessionContextManager.getAggregateStats();
+      const dedupStats = schemaDeduplicator.getStats();
+
+      return {
+        session: {
+          schemasInContext: sessionStats.schemasInContext,
+          duplicatesAvoided: sessionStats.duplicatesAvoided,
+          tokensSaved: sessionStats.tokensSaved,
+          totalItemsSent: sessionStats.totalItemsSent,
+        },
+        schemaDeduplication: {
+          uniqueSchemas: dedupStats.uniqueSchemas,
+          totalSchemas: dedupStats.totalSchemas,
+          duplicateSchemas: dedupStats.duplicateSchemas,
+          estimatedTokensSaved: dedupStats.estimatedTokensSaved,
+        },
+        aggregate: {
+          activeSessions: aggregateStats.activeSessions,
+          totalDuplicatesAvoided: aggregateStats.totalDuplicatesAvoided,
+          totalTokensSaved: aggregateStats.totalTokensSaved,
+        },
+      };
+    }
 
     // Tool Discovery
     if (name === `${prefix}_list_tool_names`) {
@@ -863,16 +909,17 @@ export function createGatewayTools(
 
 /**
  * Apply filtering to tool results for context efficiency
+ * Now includes default value omission for additional token savings
  */
 function applyResultFilter(
   result: unknown,
-  filter: { maxRows?: number; maxTokens?: number; fields?: string[]; format?: string }
+  filter: { maxRows?: number; maxTokens?: number; fields?: string[]; format?: string; optimize?: boolean }
 ): unknown {
   if (!result || typeof result !== 'object') {
     return result;
   }
 
-  const { maxRows, maxTokens, fields, format } = filter;
+  const { maxRows, maxTokens, fields, format, optimize = true } = filter;
 
   if (Array.isArray(result)) {
     let filtered = result;
@@ -889,6 +936,11 @@ function applyResultFilter(
         }
         return selected;
       });
+    }
+
+    // Apply default value omission (strip nulls, empty strings, etc.)
+    if (optimize) {
+      filtered = optimizeApiResponse(filtered) as typeof filtered;
     }
 
     // Apply token budget if specified (takes precedence over maxRows)
@@ -921,7 +973,12 @@ function applyResultFilter(
     return filtered;
   }
 
-  const objResult = result as Record<string, unknown>;
+  // Apply optimization to object results
+  let objResult = result as Record<string, unknown>;
+  if (optimize) {
+    objResult = optimizeApiResponse(objResult);
+  }
+
   if (objResult.content && Array.isArray(objResult.content)) {
     return {
       ...objResult,
@@ -929,5 +986,5 @@ function applyResultFilter(
     };
   }
 
-  return result;
+  return objResult;
 }
