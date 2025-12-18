@@ -37,7 +37,7 @@ export interface Backend extends EventEmitter {
 
   connect(): Promise<void>;
   disconnect(): Promise<void>;
-  sendRequest(request: MCPRequest): Promise<MCPResponse>;
+  sendRequest(request: MCPRequest, timeout?: number): Promise<MCPResponse>;
 
   /**
    * Remove tool prefix to get original name for backend call

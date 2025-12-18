@@ -408,7 +408,7 @@ export class BackendManager extends EventEmitter {
   /**
    * Route a tool call to the appropriate backend
    */
-  async callTool(toolName: string, args: unknown): Promise<MCPResponse> {
+  async callTool(toolName: string, args: unknown, timeout?: number): Promise<MCPResponse> {
     const backendId = this.toolToBackend.get(toolName);
     if (!backendId) {
       return {
@@ -446,7 +446,7 @@ export class BackendManager extends EventEmitter {
       },
     };
 
-    return backend.sendRequest(request);
+    return backend.sendRequest(request, timeout);
   }
 
   /**

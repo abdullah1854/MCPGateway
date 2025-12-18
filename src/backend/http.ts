@@ -96,12 +96,12 @@ export class HttpBackend extends BaseBackend {
     this.activeRequests = 0;
   }
 
-  async sendRequest(request: MCPRequest): Promise<MCPResponse> {
+  async sendRequest(request: MCPRequest, timeout?: number): Promise<MCPResponse> {
     // Wait for a slot using promise-based queue (no busy-wait)
     await this.acquireSlot();
 
     try {
-      return await this.executeRequest(request);
+      return await this.executeRequest(request, timeout);
     } finally {
       this.releaseSlot();
     }
@@ -135,8 +135,8 @@ export class HttpBackend extends BaseBackend {
     }
   }
 
-  private async executeRequest(request: MCPRequest): Promise<MCPResponse> {
-    const timeoutMs = this.config.timeout;
+  private async executeRequest(request: MCPRequest, timeoutOverride?: number): Promise<MCPResponse> {
+    const timeoutMs = timeoutOverride ?? this.config.timeout;
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
 

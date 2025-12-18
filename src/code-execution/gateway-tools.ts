@@ -350,6 +350,10 @@ export function createGatewayTools(
             description: 'Auto-apply summary filter when no filter provided. Set false for raw results.',
             default: true,
           },
+          timeout: {
+            type: 'number',
+            description: 'Timeout in milliseconds (default: backend default)',
+          },
         },
         required: ['toolName'],
       },
@@ -429,6 +433,7 @@ export function createGatewayTools(
                   description: 'Optional filter applied to this call result',
                   properties: {
                     maxRows: { type: 'number' },
+                    maxTokens: { type: 'number', description: 'Maximum approximate tokens in response' },
                     fields: { type: 'array', items: { type: 'string' } },
                     format: { type: 'string', enum: ['full', 'summary', 'sample'] },
                   },
@@ -437,6 +442,10 @@ export function createGatewayTools(
                   type: 'boolean',
                   description: 'Auto-apply summary filter when no filter provided. Set false for raw results.',
                   default: true,
+                },
+                timeout: {
+                  type: 'number',
+                  description: 'Timeout in milliseconds for this specific call',
                 },
               },
               required: ['toolName'],
@@ -849,21 +858,36 @@ export function createGatewayTools(
     if (name === `${prefix}_call_tool_filtered` && enableCodeExecution) {
       const toolName = params.toolName as string;
       const toolArgs = tokenizer ? tokenizer.detokenizeObject(params.args || {}) : (params.args || {});
-      const filter = params.filter as { maxRows?: number; fields?: string[]; format?: string } | undefined;
+      const filter = params.filter as { maxRows?: number; maxTokens?: number; fields?: string[]; format?: string } | undefined;
       const smart = params.smart as boolean | undefined;
+      const timeout = params.timeout as number | undefined;
 
       if (!isProgrammaticToolAllowed(toolName)) {
         return { success: false, error: `Tool not allowed for programmatic calls: ${toolName}` };
       }
 
-      const response = await backendManager.callTool(toolName, toolArgs);
+      // Auto-increase timeout for search/research tools if not specified
+      const effectiveTimeout = timeout ?? (
+        toolName.includes('search') || toolName.includes('research') || toolName.includes('perplexity') 
+          ? 60000 
+          : undefined
+      );
+
+      const response = await backendManager.callTool(toolName, toolArgs, effectiveTimeout);
       if (response.error) {
         return { success: false, error: response.error.message };
       }
 
       let result = response.result;
+      
+      // Safety: Hard limit to prevent token overflow if no filter is provided
+      const safetyFilter = (smart === false && !filter) 
+        ? { maxTokens: 25000, format: 'summary' } // ~100k chars limit
+        : undefined;
+
       const effectiveFilter =
-        filter ?? (smart !== false ? { maxRows: 20, format: 'summary' } : undefined);
+        filter ?? safetyFilter ?? (smart !== false ? { maxRows: 20, format: 'summary' } : undefined);
+      
       if (effectiveFilter) {
         result = applyResultFilter(result, effectiveFilter);
       }
@@ -933,8 +957,9 @@ export function createGatewayTools(
       const calls = params.calls as Array<{
         toolName: string;
         args?: unknown;
-        filter?: { maxRows?: number; fields?: string[]; format?: string };
+        filter?: { maxRows?: number; maxTokens?: number; fields?: string[]; format?: string };
         smart?: boolean;
+        timeout?: number;
       }>;
 
       for (const c of calls) {
@@ -943,19 +968,32 @@ export function createGatewayTools(
         }
       }
 
-      // Ensure args is always present for type compatibility
-      const normalizedCalls = calls.map(c => ({
-        toolName: c.toolName,
-        args: tokenizer ? tokenizer.detokenizeObject(c.args ?? {}) : (c.args ?? {}),
+      // Execute calls in parallel with their respective timeouts
+      const results = await Promise.all(calls.map(async (c) => {
+        const toolArgs = tokenizer ? tokenizer.detokenizeObject(c.args ?? {}) : (c.args ?? {});
+        
+        // Auto-increase timeout for search/research tools if not specified
+        const effectiveTimeout = c.timeout ?? (
+          c.toolName.includes('search') || c.toolName.includes('research') || c.toolName.includes('perplexity') 
+            ? 60000 
+            : undefined
+        );
+
+        return backendManager.callTool(c.toolName, toolArgs, effectiveTimeout);
       }));
-      const results = await backendManager.callToolsParallel(normalizedCalls);
 
       return {
         success: true,
         results: results.map((r, i) => {
           let result = r.result;
+          
+          // Safety: Hard limit to prevent token overflow if no filter is provided
+          const safetyFilter = (calls[i].smart === false && !calls[i].filter) 
+            ? { maxTokens: 25000, format: 'summary' } 
+            : undefined;
+
           const effectiveFilter =
-            calls[i].filter ?? (calls[i].smart !== false ? { maxRows: 20, format: 'summary' } : undefined);
+            calls[i].filter ?? safetyFilter ?? (calls[i].smart !== false ? { maxRows: 20, format: 'summary' } : undefined);
 
           if (effectiveFilter) {
             result = applyResultFilter(result, effectiveFilter);

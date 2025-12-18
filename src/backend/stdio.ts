@@ -218,16 +218,17 @@ export class StdioBackend extends BaseBackend {
     this._capabilities = undefined;
   }
 
-  async sendRequest(request: MCPRequest): Promise<MCPResponse> {
+  async sendRequest(request: MCPRequest, timeoutOverride?: number): Promise<MCPResponse> {
     if (!this.process?.stdin) {
       throw new Error('Backend not connected');
     }
 
     return new Promise((resolve, reject) => {
+      const timeoutMs = timeoutOverride ?? this.config.timeout;
       const timeout = setTimeout(() => {
         this.pendingRequests.delete(request.id);
-        reject(new Error(`Request timeout for ${request.method}`));
-      }, this.config.timeout);
+        reject(new Error(`Request timeout for ${request.method} after ${timeoutMs}ms`));
+      }, timeoutMs);
 
       this.pendingRequests.set(request.id, { resolve, reject, timeout });
 
