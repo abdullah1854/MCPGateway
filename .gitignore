@@ -36,6 +36,7 @@ logs/
 .idea/
 *.swp
 *.swo
+*.code-workspace
 .DS_Store
 
 # Test coverage

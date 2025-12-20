@@ -62,7 +62,7 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
     const tools = backendManager.getAllToolsIncludingDisabled();
     const disabledTools = backendManager.getDisabledTools();
     const disabledBackends = backendManager.getDisabledBackends();
-    
+
     const toolsWithStatus = tools.map(tool => {
       // Prefer authoritative mapping from backend manager; fall back to prefix heuristic
       const backendId =
@@ -71,7 +71,7 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
           : findBackendIdForTool(tool.name, backendManager);
 
       const backendDisabled = backendId ? disabledBackends.has(backendId) : false;
-      
+
       return {
         ...tool,
         backendId,
@@ -651,6 +651,99 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
     } catch (error) {
       res.status(500).json({
         error: 'Failed to refresh usage data',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // ==========================================
+  // Cipher Memory API Routes
+  // ==========================================
+  const CIPHER_API_URL = process.env.CIPHER_API_URL || 'http://localhost:8082';
+
+  // API: Get Cipher memory sessions
+  router.get('/api/cipher/sessions', async (_req: Request, res: Response) => {
+    try {
+      const response = await fetch(`${CIPHER_API_URL}/api/sessions`);
+      if (!response.ok) {
+        throw new Error(`Cipher API returned ${response.status}`);
+      }
+      const data = await response.json();
+      res.json(data);
+    } catch (error) {
+      res.status(503).json({
+        error: 'Cipher memory not available',
+        message: error instanceof Error ? error.message : 'Could not connect to Cipher. Make sure cipher-memory is running.',
+      });
+    }
+  });
+
+  // API: Get Cipher session history
+  router.get('/api/cipher/sessions/:sessionId/history', async (req: Request, res: Response) => {
+    try {
+      const { sessionId } = req.params;
+      const response = await fetch(`${CIPHER_API_URL}/api/sessions/${sessionId}/history`);
+      if (!response.ok) {
+        throw new Error(`Cipher API returned ${response.status}`);
+      }
+      const data = await response.json();
+      res.json(data);
+    } catch (error) {
+      res.status(503).json({
+        error: 'Failed to fetch session history',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // API: Ask Cipher (send message to memory)
+  router.post('/api/cipher/ask', async (req: Request, res: Response) => {
+    try {
+      const { message } = req.body;
+      if (!message) {
+        res.status(400).json({ error: 'Message is required' });
+        return;
+      }
+      const response = await fetch(`${CIPHER_API_URL}/api/message/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message }),
+      });
+      if (!response.ok) {
+        throw new Error(`Cipher API returned ${response.status}`);
+      }
+      const data = await response.json();
+      res.json(data);
+    } catch (error) {
+      res.status(503).json({
+        error: 'Failed to communicate with Cipher',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // API: Search Cipher memory
+  router.get('/api/cipher/search', async (req: Request, res: Response) => {
+    try {
+      const { q } = req.query;
+      if (!q) {
+        res.status(400).json({ error: 'Search query (q) is required' });
+        return;
+      }
+      // Search by asking Cipher
+      const response = await fetch(`${CIPHER_API_URL}/api/message/sync`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ message: `Search memory for: ${q}` }),
+      });
+      if (!response.ok) {
+        throw new Error(`Cipher API returned ${response.status}`);
+      }
+      const data = await response.json();
+      res.json(data);
+    } catch (error) {
+      res.status(503).json({
+        error: 'Failed to search Cipher memory',
         message: error instanceof Error ? error.message : String(error),
       });
     }
@@ -1339,7 +1432,97 @@ function getDashboardHTML(): string {
     @keyframes spin {
       to { transform: rotate(360deg); }
     }
-    
+
+    @keyframes shimmer {
+      0% { background-position: -200% 0; }
+      100% { background-position: 200% 0; }
+    }
+
+    @keyframes gradientFlow {
+      0% { background-position: 0% 50%; }
+      50% { background-position: 100% 50%; }
+      100% { background-position: 0% 50%; }
+    }
+
+    @keyframes borderGlow {
+      0%, 100% { opacity: 0.5; }
+      50% { opacity: 1; }
+    }
+
+    /* Enhanced stat cards with gradient border animation */
+    .stat {
+      position: relative;
+    }
+
+    .stat::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, var(--accent), var(--accent-secondary), var(--accent));
+      background-size: 200% 100%;
+      animation: gradientFlow 3s ease infinite;
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .stat:hover::after {
+      opacity: 1;
+    }
+
+    /* Enhanced pill badges with count glow */
+    .pill .badge {
+      position: relative;
+      overflow: hidden;
+    }
+
+    .pill:hover .badge {
+      animation: pulse 1s ease infinite;
+    }
+
+    /* Shimmer effect for cards on hover */
+    .backend-card::after {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: -100%;
+      width: 100%;
+      height: 100%;
+      background: linear-gradient(
+        90deg,
+        transparent,
+        rgba(255, 255, 255, 0.03),
+        transparent
+      );
+      transition: left 0.5s ease;
+      pointer-events: none;
+    }
+
+    .backend-card:hover::after {
+      left: 100%;
+    }
+
+    /* Enhanced logo with subtle pulse */
+    .logo-icon {
+      animation: pulse 3s ease-in-out infinite;
+    }
+
+    /* Animated gradient for the header underline */
+    header::after {
+      background: linear-gradient(90deg, var(--accent), var(--accent-secondary), #ec4899, var(--accent));
+      background-size: 300% 100%;
+      animation: gradientFlow 4s ease infinite;
+      width: 200px;
+    }
+
+    /* Tool count badge enhancement */
+    .tool-count {
+      background: linear-gradient(135deg, rgba(139, 92, 246, 0.2), rgba(34, 211, 238, 0.2));
+      border: 1px solid rgba(139, 92, 246, 0.3);
+    }
+
     .quick-actions {
       display: flex;
       gap: 0.5rem;
@@ -1982,6 +2165,292 @@ function getDashboardHTML(): string {
       border-color: var(--border-hover);
     }
 
+    /* Memory Tab Styles */
+    .memory-search-container {
+      display: flex;
+      gap: 1rem;
+      margin-bottom: 1.5rem;
+      align-items: stretch;
+    }
+
+    .memory-search {
+      flex: 1;
+    }
+
+    .memory-loading {
+      text-align: center;
+      padding: 2rem;
+      color: var(--text-muted);
+    }
+
+    .memory-stats-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+      gap: 1rem;
+      margin-bottom: 2rem;
+    }
+
+    .memory-stat {
+      background: var(--bg-card);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      padding: 1.25rem;
+      border-radius: 16px;
+      border: 1px solid var(--border);
+      position: relative;
+      overflow: hidden;
+      transition: all 0.3s ease;
+    }
+
+    .memory-stat::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 3px;
+      background: linear-gradient(135deg, #06b6d4 0%, #8b5cf6 100%);
+    }
+
+    .memory-stat:hover {
+      border-color: var(--border-hover);
+      transform: translateY(-2px);
+    }
+
+    .memory-stat-value {
+      font-size: 1.75rem;
+      font-weight: 700;
+      background: linear-gradient(135deg, #06b6d4 0%, #8b5cf6 100%);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+      line-height: 1.2;
+    }
+
+    .memory-stat-label {
+      font-size: 0.75rem;
+      color: var(--text-muted);
+      text-transform: uppercase;
+      letter-spacing: 0.1em;
+      font-weight: 500;
+      margin-top: 0.5rem;
+    }
+
+    .memory-sessions-section {
+      margin-top: 1.5rem;
+    }
+
+    .memory-sessions-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fill, minmax(320px, 1fr));
+      gap: 1rem;
+    }
+
+    .memory-session-card {
+      background: var(--bg-card);
+      backdrop-filter: blur(20px);
+      -webkit-backdrop-filter: blur(20px);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 1.25rem;
+      cursor: pointer;
+      transition: all 0.3s ease;
+      position: relative;
+      overflow: hidden;
+    }
+
+    .memory-session-card::before {
+      content: '';
+      position: absolute;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, #06b6d4, #8b5cf6, #ec4899);
+      opacity: 0;
+      transition: opacity 0.3s ease;
+    }
+
+    .memory-session-card:hover {
+      border-color: var(--accent);
+      transform: translateY(-3px);
+      box-shadow: 0 12px 40px rgba(139, 92, 246, 0.2);
+    }
+
+    .memory-session-card:hover::before {
+      opacity: 1;
+    }
+
+    .memory-session-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: flex-start;
+      margin-bottom: 0.75rem;
+    }
+
+    .memory-session-title {
+      font-size: 0.95rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      line-height: 1.3;
+    }
+
+    .memory-session-meta {
+      font-size: 0.8rem;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    .memory-session-preview {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      line-height: 1.5;
+      display: -webkit-box;
+      -webkit-line-clamp: 2;
+      -webkit-box-orient: vertical;
+      overflow: hidden;
+    }
+
+    .memory-badge {
+      display: inline-block;
+      padding: 0.2rem 0.6rem;
+      border-radius: 6px;
+      font-size: 0.7rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+    }
+
+    .memory-badge.decision { background: rgba(139, 92, 246, 0.2); color: #a78bfa; }
+    .memory-badge.learning { background: rgba(34, 211, 153, 0.2); color: #34d399; }
+    .memory-badge.pattern { background: rgba(34, 211, 238, 0.2); color: #22d3ee; }
+    .memory-badge.insight { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
+    .memory-badge.blocker { background: rgba(248, 113, 113, 0.2); color: #f87171; }
+    .memory-badge.milestone { background: rgba(236, 72, 153, 0.2); color: #ec4899; }
+
+    .memory-detail-panel {
+      position: fixed;
+      top: 0;
+      right: 0;
+      width: 50%;
+      max-width: 700px;
+      height: 100vh;
+      background: var(--bg-secondary);
+      border-left: 1px solid var(--border);
+      z-index: 1000;
+      transform: translateX(100%);
+      transition: transform 0.3s ease;
+      display: flex;
+      flex-direction: column;
+    }
+
+    .memory-detail-panel.active {
+      transform: translateX(0);
+    }
+
+    .memory-detail-panel.hidden {
+      display: none;
+    }
+
+    .memory-detail-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 1.5rem;
+      border-bottom: 1px solid var(--border);
+    }
+
+    .memory-detail-header h3 {
+      font-size: 1.1rem;
+      font-weight: 600;
+      color: var(--text-primary);
+    }
+
+    #memory-detail-content {
+      flex: 1;
+      overflow-y: auto;
+      padding: 1.5rem;
+    }
+
+    .memory-message {
+      margin-bottom: 1.5rem;
+      padding: 1rem;
+      background: var(--bg-glass);
+      border-radius: 12px;
+      border: 1px solid var(--border);
+    }
+
+    .memory-message.user {
+      border-left: 3px solid var(--accent);
+    }
+
+    .memory-message.assistant {
+      border-left: 3px solid var(--success);
+    }
+
+    .memory-message-role {
+      font-size: 0.75rem;
+      font-weight: 600;
+      text-transform: uppercase;
+      letter-spacing: 0.05em;
+      color: var(--text-muted);
+      margin-bottom: 0.5rem;
+    }
+
+    .memory-message-content {
+      font-size: 0.9rem;
+      color: var(--text-secondary);
+      line-height: 1.6;
+      white-space: pre-wrap;
+    }
+
+    .memory-error {
+      text-align: center;
+      padding: 2rem;
+      color: var(--warning);
+      background: rgba(251, 191, 36, 0.1);
+      border-radius: 12px;
+      border: 1px solid var(--warning);
+    }
+
+    .memory-empty {
+      text-align: center;
+      padding: 3rem;
+      color: var(--text-muted);
+    }
+
+    .memory-empty svg {
+      width: 64px;
+      height: 64px;
+      margin-bottom: 1rem;
+      opacity: 0.5;
+    }
+
+    .memory-search-results {
+      margin-top: 1.5rem;
+    }
+
+    .memory-search-result {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .memory-search-result-title {
+      font-size: 0.9rem;
+      font-weight: 600;
+      color: var(--text-primary);
+      margin-bottom: 0.5rem;
+    }
+
+    .memory-search-result-content {
+      font-size: 0.85rem;
+      color: var(--text-secondary);
+      line-height: 1.5;
+    }
+
     @media (max-width: 1024px) {
       .header-actions {
         flex-wrap: wrap;
@@ -2067,6 +2536,10 @@ function getDashboardHTML(): string {
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
         Servers & Tools
       </button>
+      <button class="tab-btn" onclick="switchTab('memory')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 8v4l3 3"></path></svg>
+        Memory
+      </button>
       <button class="tab-btn" onclick="switchTab('usage')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="20" x2="12" y2="10"></line><line x1="18" y1="20" x2="18" y2="4"></line><line x1="6" y1="20" x2="6" y2="16"></line></svg>
         Claude Usage
@@ -2102,6 +2575,57 @@ function getDashboardHTML(): string {
 
       <div id="backends-container">
         <div class="loading">Loading backends</div>
+      </div>
+    </div>
+
+    <!-- Memory Tab -->
+    <div id="tab-memory" class="tab-content">
+      <div class="section-header">
+        <div>
+          <div class="section-title">Cipher Memory</div>
+          <div class="section-subtitle">Persistent AI memory across all IDEs - decisions, learnings, patterns, and insights.</div>
+        </div>
+        <div class="memory-actions">
+          <button class="refresh-btn" onclick="refreshMemoryData()">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+            Refresh
+          </button>
+        </div>
+      </div>
+
+      <!-- Memory Search -->
+      <div class="memory-search-container">
+        <div class="search-box memory-search">
+          <input type="text" id="memory-search" placeholder="Search memories (decisions, learnings, patterns)..." />
+        </div>
+        <button class="btn btn-primary" onclick="searchMemory()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
+          Search
+        </button>
+      </div>
+
+      <!-- Memory Stats -->
+      <div id="memory-stats-container">
+        <div class="memory-loading">Connecting to Cipher Memory...</div>
+      </div>
+
+      <!-- Memory Sessions -->
+      <div class="memory-sessions-section">
+        <div class="section-title" style="margin-bottom: 1rem;">Memory Sessions</div>
+        <div id="memory-sessions-container">
+          <div class="memory-loading">Loading sessions...</div>
+        </div>
+      </div>
+
+      <!-- Memory Detail Panel -->
+      <div id="memory-detail-panel" class="memory-detail-panel hidden">
+        <div class="memory-detail-header">
+          <h3 id="memory-detail-title">Session Details</h3>
+          <button class="modal-close" onclick="closeMemoryDetail()">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><line x1="18" y1="6" x2="6" y2="18"></line><line x1="6" y1="6" x2="18" y2="18"></line></svg>
+          </button>
+        </div>
+        <div id="memory-detail-content"></div>
       </div>
     </div>
 
@@ -3055,6 +3579,11 @@ function getDashboardHTML(): string {
       if (tabId === 'usage' && !usageData) {
         loadUsageData();
       }
+
+      // Load data for memory tab
+      if (tabId === 'memory' && !memoryData) {
+        loadMemoryData();
+      }
     }
 
     // ==========================================
@@ -3105,8 +3634,26 @@ function getDashboardHTML(): string {
 
       const container = document.getElementById('usage-stats-container');
       const formatCost = (cost) => '$' + cost.toFixed(2);
-      const formatNumber = (num) => num.toLocaleString();
+      
+      const formatCompactNumber = (num) => {
+        if (num >= 1000000000) {
+          return (num / 1000000000).toFixed(2) + 'B';
+        }
+        if (num >= 1000000) {
+          return (num / 1000000).toFixed(2) + 'M';
+        }
+        if (num >= 1000) {
+          return (num / 1000).toFixed(1) + 'k';
+        }
+        return num.toLocaleString();
+      };
+      
       const formatPercent = (pct) => pct.toFixed(1) + '%';
+
+      // Calculate additional metrics
+      const projectedMonthly = usageData.avgCostPerDay * 30;
+      const cacheSavings = usageData.totalCacheReadTokens * 0.000003; // Approx savings from cache
+      const totalRequests = usageData.totalSessions || usageData.daily?.length || 0;
 
       container.innerHTML = \`
         <div class="usage-grid">
@@ -3118,16 +3665,35 @@ function getDashboardHTML(): string {
           <div class="usage-stat">
             <div class="usage-stat-value">\${formatCost(usageData.avgCostPerDay)}</div>
             <div class="usage-stat-label">Avg Cost/Day</div>
+            <div class="usage-stat-sublabel">~\${formatCost(projectedMonthly)}/month projected</div>
           </div>
           <div class="usage-stat success">
             <div class="usage-stat-value">\${formatPercent(usageData.cacheHitRatio)}</div>
             <div class="usage-stat-label">Cache Hit Ratio</div>
-            <div class="usage-stat-sublabel">\${formatNumber(usageData.totalCacheReadTokens)} reads</div>
+            <div class="usage-stat-sublabel">~\${formatCost(cacheSavings)} saved</div>
           </div>
           <div class="usage-stat">
-            <div class="usage-stat-value">\${formatNumber(Math.round((usageData.totalInputTokens + usageData.totalOutputTokens) / 1000000))}M</div>
+            <div class="usage-stat-value">\${formatCompactNumber(usageData.totalInputTokens + usageData.totalOutputTokens)}</div>
             <div class="usage-stat-label">Total Tokens</div>
-            <div class="usage-stat-sublabel">\${formatNumber(Math.round(usageData.totalInputTokens / 1000))}k in / \${formatNumber(Math.round(usageData.totalOutputTokens / 1000))}k out</div>
+            <div class="usage-stat-sublabel">\${formatCompactNumber(usageData.totalInputTokens)} in / \${formatCompactNumber(usageData.totalOutputTokens)} out</div>
+          </div>
+        </div>
+        <div class="usage-grid" style="margin-top: -1rem;">
+          <div class="usage-stat">
+            <div class="usage-stat-value">\${formatCompactNumber(usageData.totalCacheCreationTokens || 0)}</div>
+            <div class="usage-stat-label">Cache Write</div>
+          </div>
+          <div class="usage-stat">
+            <div class="usage-stat-value">\${formatCompactNumber(usageData.totalCacheReadTokens || 0)}</div>
+            <div class="usage-stat-label">Cache Read</div>
+          </div>
+          <div class="usage-stat">
+            <div class="usage-stat-value">\${formatCompactNumber(usageData.totalInputTokens || 0)}</div>
+            <div class="usage-stat-label">Input Tokens</div>
+          </div>
+          <div class="usage-stat">
+            <div class="usage-stat-value">\${formatCompactNumber(usageData.totalOutputTokens || 0)}</div>
+            <div class="usage-stat-label">Output Tokens</div>
           </div>
         </div>
       \`;
@@ -3430,6 +3996,273 @@ function getDashboardHTML(): string {
         }
       }, 5000);
     }
+
+    // ==========================================
+    // Cipher Memory
+    // ==========================================
+    let memoryData = null;
+    let memorySessions = [];
+
+    async function loadMemoryData() {
+      const statsContainer = document.getElementById('memory-stats-container');
+      const sessionsContainer = document.getElementById('memory-sessions-container');
+
+      statsContainer.innerHTML = '<div class="memory-loading">Connecting to Cipher Memory...</div>';
+      sessionsContainer.innerHTML = '<div class="memory-loading">Loading sessions...</div>';
+
+      try {
+        const res = await fetch('/dashboard/api/cipher/sessions');
+
+        if (!res.ok) {
+          const error = await res.json();
+          statsContainer.innerHTML = \`
+            <div class="memory-error">
+              <p><strong>Cipher Memory not available</strong></p>
+              <p>\${error.message || 'Make sure cipher-memory container is running.'}</p>
+            </div>
+          \`;
+          sessionsContainer.innerHTML = '';
+          return;
+        }
+
+        const data = await res.json();
+        memoryData = data;
+        memorySessions = data.data?.sessions || data.sessions || [];
+        renderMemoryStats();
+        renderMemorySessions();
+      } catch (err) {
+        statsContainer.innerHTML = \`
+          <div class="memory-error">
+            <p><strong>Error connecting to Cipher</strong></p>
+            <p>\${err.message}</p>
+          </div>
+        \`;
+        sessionsContainer.innerHTML = '';
+      }
+    }
+
+    function renderMemoryStats() {
+      const container = document.getElementById('memory-stats-container');
+      const sessions = memorySessions;
+      const totalSessions = sessions.length;
+      const totalMessages = sessions.reduce((sum, s) => sum + (s.messageCount || 0), 0);
+
+      // Count session types based on title/metadata
+      const sessionTypes = {
+        decisions: 0,
+        learnings: 0,
+        patterns: 0,
+        insights: 0,
+      };
+
+      sessions.forEach(s => {
+        const title = (s.title || s.id || '').toLowerCase();
+        if (title.includes('decision')) sessionTypes.decisions++;
+        else if (title.includes('learning') || title.includes('fix')) sessionTypes.learnings++;
+        else if (title.includes('pattern')) sessionTypes.patterns++;
+        else if (title.includes('insight')) sessionTypes.insights++;
+      });
+
+      container.innerHTML = \`
+        <div class="memory-stats-grid">
+          <div class="memory-stat">
+            <div class="memory-stat-value">\${totalSessions}</div>
+            <div class="memory-stat-label">Memory Sessions</div>
+          </div>
+          <div class="memory-stat">
+            <div class="memory-stat-value">\${totalMessages}</div>
+            <div class="memory-stat-label">Total Messages</div>
+          </div>
+          <div class="memory-stat">
+            <div class="memory-stat-value">\${sessionTypes.decisions}</div>
+            <div class="memory-stat-label">Decisions</div>
+          </div>
+          <div class="memory-stat">
+            <div class="memory-stat-value">\${sessionTypes.learnings}</div>
+            <div class="memory-stat-label">Learnings</div>
+          </div>
+        </div>
+        <div style="margin-top: 1rem; padding: 0.75rem 1rem; background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.2); border-radius: 8px; font-size: 0.85rem;">
+          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2.5" stroke-linecap="round"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg>
+            <strong style="color: #a78bfa;">Project-Scoped Memory</strong>
+          </div>
+          <div style="opacity: 0.8;">Memories are now tagged with project paths. Pass <code style="background: rgba(139, 92, 246, 0.2); padding: 0.1rem 0.3rem; border-radius: 4px;">projectPath</code> to <code style="background: rgba(139, 92, 246, 0.2); padding: 0.1rem 0.3rem; border-radius: 4px;">ask_cipher</code> for cross-IDE memory persistence.</div>
+        </div>
+      \`;
+    }
+
+    function renderMemorySessions() {
+      const container = document.getElementById('memory-sessions-container');
+      const sessions = memorySessions;
+
+      if (!sessions || sessions.length === 0) {
+        container.innerHTML = \`
+          <div class="memory-empty">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
+              <circle cx="12" cy="12" r="10"></circle>
+              <path d="M12 8v4l3 3"></path>
+            </svg>
+            <p>No memory sessions yet</p>
+            <p style="font-size: 0.85rem; margin-top: 0.5rem;">Start using Cipher to store decisions, learnings, and patterns.</p>
+          </div>
+        \`;
+        return;
+      }
+
+      const sessionsHTML = sessions.map(session => {
+        const title = session.title || session.id || 'Unnamed Session';
+        const messageCount = session.messageCount || 0;
+        const lastActive = session.lastActive || session.updatedAt || session.createdAt;
+        const formattedDate = lastActive ? new Date(lastActive).toLocaleDateString('en-US', {
+          month: 'short',
+          day: 'numeric',
+          hour: '2-digit',
+          minute: '2-digit'
+        }) : 'Unknown';
+
+        // Determine badge type
+        let badgeType = '';
+        let badgeText = '';
+        const titleLower = title.toLowerCase();
+        if (titleLower.includes('decision')) { badgeType = 'decision'; badgeText = 'Decision'; }
+        else if (titleLower.includes('learning') || titleLower.includes('fix')) { badgeType = 'learning'; badgeText = 'Learning'; }
+        else if (titleLower.includes('pattern')) { badgeType = 'pattern'; badgeText = 'Pattern'; }
+        else if (titleLower.includes('insight')) { badgeType = 'insight'; badgeText = 'Insight'; }
+        else if (titleLower.includes('blocker')) { badgeType = 'blocker'; badgeText = 'Blocker'; }
+        else if (titleLower.includes('milestone')) { badgeType = 'milestone'; badgeText = 'Milestone'; }
+
+        return \`
+          <div class="memory-session-card" onclick="viewMemorySession('\${escapeHtml(session.id)}')">
+            <div class="memory-session-header">
+              <div class="memory-session-title">\${escapeHtml(title)}</div>
+              \${badgeText ? \`<span class="memory-badge \${badgeType}">\${badgeText}</span>\` : ''}
+            </div>
+            <div class="memory-session-meta">
+              \${messageCount} messages • \${formattedDate}
+            </div>
+          </div>
+        \`;
+      }).join('');
+
+      container.innerHTML = \`<div class="memory-sessions-grid">\${sessionsHTML}</div>\`;
+    }
+
+    async function viewMemorySession(sessionId) {
+      const panel = document.getElementById('memory-detail-panel');
+      const titleEl = document.getElementById('memory-detail-title');
+      const contentEl = document.getElementById('memory-detail-content');
+
+      panel.classList.remove('hidden');
+      panel.classList.add('active');
+      titleEl.textContent = 'Loading...';
+      contentEl.innerHTML = '<div class="memory-loading">Loading session history...</div>';
+
+      try {
+        const res = await fetch(\`/dashboard/api/cipher/sessions/\${encodeURIComponent(sessionId)}/history\`);
+
+        if (!res.ok) {
+          throw new Error('Failed to load session history');
+        }
+
+        const data = await res.json();
+        const history = data.data?.history || data.history || [];
+        const session = memorySessions.find(s => s.id === sessionId);
+
+        titleEl.textContent = session?.title || sessionId;
+
+        if (history.length === 0) {
+          contentEl.innerHTML = '<div class="memory-empty"><p>No messages in this session</p></div>';
+          return;
+        }
+
+        const messagesHTML = history.map(msg => {
+          const role = msg.role || 'unknown';
+          const content = msg.content || '';
+          const textContent = Array.isArray(content)
+            ? content.map(c => c.text || c.content || JSON.stringify(c)).join('\\n')
+            : (typeof content === 'string' ? content : JSON.stringify(content));
+
+          return \`
+            <div class="memory-message \${role}">
+              <div class="memory-message-role">\${escapeHtml(role)}</div>
+              <div class="memory-message-content">\${escapeHtml(textContent)}</div>
+            </div>
+          \`;
+        }).join('');
+
+        contentEl.innerHTML = messagesHTML;
+      } catch (err) {
+        contentEl.innerHTML = \`
+          <div class="memory-error">
+            <p><strong>Error loading session</strong></p>
+            <p>\${err.message}</p>
+          </div>
+        \`;
+      }
+    }
+
+    function closeMemoryDetail() {
+      const panel = document.getElementById('memory-detail-panel');
+      panel.classList.remove('active');
+      setTimeout(() => panel.classList.add('hidden'), 300);
+    }
+
+    async function searchMemory() {
+      const searchInput = document.getElementById('memory-search');
+      const query = searchInput.value.trim();
+
+      if (!query) {
+        showToast('Please enter a search query', true);
+        return;
+      }
+
+      const sessionsContainer = document.getElementById('memory-sessions-container');
+      sessionsContainer.innerHTML = '<div class="memory-loading">Searching memory...</div>';
+
+      try {
+        const res = await fetch(\`/dashboard/api/cipher/search?q=\${encodeURIComponent(query)}\`);
+
+        if (!res.ok) {
+          throw new Error('Search failed');
+        }
+
+        const data = await res.json();
+        const result = data.result || data.message || data;
+
+        sessionsContainer.innerHTML = \`
+          <div class="memory-search-results">
+            <div class="section-title" style="margin-bottom: 1rem;">Search Results for "\${escapeHtml(query)}"</div>
+            <div class="memory-search-result">
+              <div class="memory-search-result-content">\${escapeHtml(typeof result === 'string' ? result : JSON.stringify(result, null, 2))}</div>
+            </div>
+            <button class="btn btn-secondary" onclick="loadMemoryData()" style="margin-top: 1rem;">
+              Back to Sessions
+            </button>
+          </div>
+        \`;
+      } catch (err) {
+        sessionsContainer.innerHTML = \`
+          <div class="memory-error">
+            <p><strong>Search failed</strong></p>
+            <p>\${err.message}</p>
+          </div>
+        \`;
+      }
+    }
+
+    function refreshMemoryData() {
+      memoryData = null;
+      memorySessions = [];
+      loadMemoryData();
+    }
+
+    // Handle Enter key for memory search
+    document.getElementById('memory-search')?.addEventListener('keydown', (e) => {
+      if (e.key === 'Enter') {
+        searchMemory();
+      }
+    });
 
     // Initial load
     loadData();

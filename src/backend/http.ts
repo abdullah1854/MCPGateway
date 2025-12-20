@@ -24,9 +24,8 @@ export class HttpBackend extends BaseBackend {
 
   constructor(config: ServerConfig) {
     super(config);
-    // Accept both 'http' and 'sse' transport types - both use HTTP with SSE streaming
-    if (config.transport.type !== 'http' && config.transport.type !== 'sse') {
-      throw new Error('HttpBackend requires http or sse transport configuration');
+    if (config.transport.type !== 'http') {
+      throw new Error('HttpBackend requires http transport configuration');
     }
   }
 

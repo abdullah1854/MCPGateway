@@ -15,6 +15,7 @@ import {
 import { Backend } from './base.js';
 import { StdioBackend } from './stdio.js';
 import { HttpBackend } from './http.js';
+import { SSEBackend } from './sse.js';
 import { logger } from '../logger.js';
 
 // Event types for BackendManager (used via EventEmitter)
@@ -49,8 +50,8 @@ export class BackendManager extends EventEmitter {
       case 'http':
         return new HttpBackend(config);
       case 'sse':
-        // SSE uses HTTP backend with different handling
-        return new HttpBackend(config);
+        // SSE uses dedicated SSEBackend with proper handshake protocol
+        return new SSEBackend(config);
       default:
         throw new Error(`Unsupported transport type: ${(config.transport as { type: string }).type}`);
     }
