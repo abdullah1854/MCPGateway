@@ -447,12 +447,15 @@ docker-compose down
 
 ## Environment Variables
 
+### Core Configuration
+
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `PORT` | `3010` | Server port |
 | `HOST` | `0.0.0.0` | Server host |
 | `LOG_LEVEL` | `info` | Log level (debug, info, warn, error) |
 | `GATEWAY_NAME` | `mcp-gateway` | Gateway name in MCP responses |
+| `GATEWAY_LITE_MODE` | `1` | Lite mode - reduces exposed gateway tools for lower token usage (recommended) |
 | `AUTH_MODE` | `none` | Authentication mode (none, api-key, oauth) |
 | `API_KEYS` | - | Comma-separated API keys |
 | `OAUTH_ISSUER` | - | OAuth token issuer |
@@ -463,6 +466,47 @@ docker-compose down
 | `ALLOW_INSECURE` | `0` | If `1`, allow unauthenticated access to dashboard, code APIs, and JSON metrics when `AUTH_MODE=none` |
 | `RATE_LIMIT_WINDOW_MS` | `60000` | Rate limit window (ms) |
 | `RATE_LIMIT_MAX_REQUESTS` | `100` | Max requests per window |
+
+### Optional Features
+
+MCP Gateway includes optional features that are **disabled by default** for minimal, public-friendly deployments. Enable them by setting the corresponding environment variable to `1`.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `ENABLE_SKILLS` | `0` | Enable Skills system - reusable code patterns and skill execution |
+| `ENABLE_CIPHER` | `0` | Enable Cipher Memory - cross-IDE persistent memory with Qdrant vector store |
+| `ENABLE_ANTIGRAVITY` | `0` | Enable Antigravity Usage - IDE quota tracking for Antigravity IDE |
+| `ENABLE_CLAUDE_USAGE` | `0` | Enable Claude Usage - API token consumption tracking |
+
+When a feature is disabled:
+- The corresponding dashboard tab is hidden
+- API endpoints return `404 Feature disabled` with instructions to enable
+- No errors occur from missing dependencies (Qdrant, Cipher service, etc.)
+
+**For personal/development use**, enable the features you need in your `.env`:
+
+```bash
+# Enable all optional features
+ENABLE_SKILLS=1
+ENABLE_CIPHER=1
+ENABLE_ANTIGRAVITY=1
+ENABLE_CLAUDE_USAGE=1
+
+# Disable lite mode to see all gateway tools
+GATEWAY_LITE_MODE=0
+```
+
+### Feature-Specific Configuration
+
+These variables are only needed when the corresponding feature is enabled:
+
+| Variable | Feature | Default | Description |
+|----------|---------|---------|-------------|
+| `CIPHER_API_URL` | Cipher | `http://localhost:8082` | Cipher Memory service URL |
+| `QDRANT_URL` | Cipher | - | Qdrant vector store URL |
+| `QDRANT_API_KEY` | Cipher | - | Qdrant API key |
+| `QDRANT_COLLECTION` | Cipher | `cipher_knowledge` | Qdrant collection name |
+| `QDRANT_TIMEOUT_MS` | Cipher | `8000` | Qdrant request timeout |
 
 ## Health Check
 
@@ -1264,6 +1308,201 @@ await gateway_create_skill({
 // Execute later with different inputs
 await gateway_execute_skill({ name: "daily-sales-report", inputs: { date: "2024-01-15" } });
 ```
+
+
+## Invoking Cipher from Any IDE
+
+Cipher exposes the `cipher_ask_cipher` tool via MCP. To ensure memories persist across IDEs and sessions, **always include the `projectPath` parameter**.
+
+### Tool Schema
+
+```typescript
+cipher_ask_cipher({
+  message: string,      // Required: What to store or ask
+  projectPath: string   // Recommended: Full project path for cross-IDE filtering
+})
+```
+
+### Quick Reference
+
+| Action | Message Format |
+|--------|----------------|
+| **Recall context** | `"Recall context for this project. What do you remember?"` |
+| **Store decision** | `"STORE DECISION: [description]. Reasoning: [why]"` |
+| **Store bug fix** | `"STORE LEARNING: Fixed [bug]. Root cause: [cause]. Solution: [fix]"` |
+| **Store milestone** | `"STORE MILESTONE: Completed [feature]. Key files: [files]"` |
+| **Store pattern** | `"STORE PATTERN: [pattern_name]. Usage: [when_to_use]"` |
+| **Store blocker** | `"STORE BLOCKER: [description]. Attempted: [what_tried]"` |
+| **Search memory** | `"Search memory for: [topic]. What patterns or learnings are relevant?"` |
+| **Session end** | `"Consolidate session. Accomplishments: [list]. Open: [items]"` |
+
+### IDE Configuration Examples
+
+Add these instructions to your IDE's rules file so the AI automatically uses Cipher.
+
+<details>
+<summary><strong>Claude Code</strong> (~/.claude/CLAUDE.md)</summary>
+
+Claude Code can use a SessionStart hook for automatic recall. For manual configuration:
+
+```markdown
+# Cipher Memory Protocol
+
+At session start, recall context:
+cipher_ask_cipher({
+  message: "Recall context for this project. What do you remember?",
+  projectPath: "/path/to/your/project"
+})
+
+Auto-store important events (decisions, bug fixes, milestones, patterns, blockers)
+using cipher_ask_cipher with the STORE prefix and always include projectPath.
+```
+
+</details>
+
+<details>
+<summary><strong>Cursor</strong> (~/.cursorrules)</summary>
+
+```markdown
+# Cipher Memory Protocol - MANDATORY
+
+## Session Start
+At the start of EVERY conversation, call:
+cipher_ask_cipher({
+  message: "Recall context for this project. What do you remember?",
+  projectPath: "/path/to/your/project"
+})
+
+## Auto-Store Events
+| Event | Call |
+|-------|------|
+| Decision | cipher_ask_cipher({ message: "STORE DECISION: ...", projectPath: "..." }) |
+| Bug fix | cipher_ask_cipher({ message: "STORE LEARNING: ...", projectPath: "..." }) |
+| Feature | cipher_ask_cipher({ message: "STORE MILESTONE: ...", projectPath: "..." }) |
+| Pattern | cipher_ask_cipher({ message: "STORE PATTERN: ...", projectPath: "..." }) |
+
+## projectPath Rules
+1. ALWAYS use FULL path: /path/to/your/project
+2. NEVER use placeholders like {cwd} - use the actual path
+3. Determine path from workspace folder or open files
+```
+
+</details>
+
+<details>
+<summary><strong>Windsurf</strong> (~/.windsurfrules)</summary>
+
+```markdown
+# Cipher Memory Protocol - MANDATORY
+
+## Session Start
+At the start of EVERY conversation, call:
+cipher_ask_cipher({
+  message: "Recall context for this project. What do you remember?",
+  projectPath: "/path/to/your/project"
+})
+
+## Auto-Store Events
+Store decisions, bug fixes, milestones, and patterns automatically using
+cipher_ask_cipher with STORE prefix. Always include full projectPath.
+
+## projectPath Rules
+1. ALWAYS use FULL path - /path/to/your/project
+2. NEVER use placeholders - determine actual path from context
+```
+
+</details>
+
+<details>
+<summary><strong>VS Code / GitHub Copilot</strong> (~/.github/copilot-instructions.md)</summary>
+
+```markdown
+# Cipher Memory Protocol - MANDATORY
+
+## Session Start
+At the start of EVERY conversation, call:
+cipher_ask_cipher({
+  message: "Recall context for this project. What do you remember?",
+  projectPath: "/path/to/your/project"
+})
+
+## Auto-Store Events
+When you encounter decisions, bug fixes, completed features, or discovered patterns,
+store them in Cipher using cipher_ask_cipher with the appropriate STORE prefix.
+
+## projectPath is MANDATORY
+- Use FULL path like /path/to/your/project
+- Never use placeholders or just the project name
+```
+
+</details>
+
+<details>
+<summary><strong>Codex CLI</strong> (~/.codex/AGENTS.md)</summary>
+
+```markdown
+# Cipher Memory Protocol - MANDATORY
+
+## Session Start
+At the start of EVERY conversation, call:
+cipher_ask_cipher message="Recall context for this project. What do you remember?" projectPath="/path/to/your/project"
+
+## Auto-Store Events
+| Event | Example Call |
+|-------|--------------|
+| Decision | cipher_ask_cipher message="STORE DECISION: [desc]" projectPath="/path/to/your/project" |
+| Bug fix | cipher_ask_cipher message="STORE LEARNING: Fixed [bug]" projectPath="/path/to/your/project" |
+| Feature | cipher_ask_cipher message="STORE MILESTONE: Completed [feature]" projectPath="/path/to/your/project" |
+
+## projectPath Rules
+1. ALWAYS use FULL path - /path/to/your/project
+2. NEVER use placeholders - look at open files to determine actual path
+```
+
+</details>
+
+<details>
+<summary><strong>Google Gemini / Antigravity</strong> (~/.gemini/GEMINI.md)</summary>
+
+```markdown
+---
+alwaysApply: true
+---
+
+# Cipher Memory Protocol - MANDATORY
+
+## CRITICAL: Determine Project Path FIRST
+Before ANY cipher call, determine the FULL project path from:
+1. Workspace folder open in the IDE
+2. File paths in the conversation
+
+## Session Start
+cipher_ask_cipher({
+  message: "Recall context for this project. What do you remember?",
+  projectPath: "/path/to/your/project"
+})
+
+## Auto-Store Events
+Store decisions, learnings, milestones, and patterns using STORE prefix.
+Always include projectPath with the FULL path.
+
+## projectPath Rules
+1. ALWAYS use FULL path - /path/to/your/project
+2. NEVER use {cwd} or {project} placeholders - they don't resolve!
+3. Determine path from context - workspace name, file paths, or ask user
+```
+
+</details>
+
+### Why projectPath Matters
+
+The `projectPath` parameter is **critical** for:
+
+1. **Cross-IDE Filtering**: Memories are scoped to projects, so switching from Cursor to Claude Code maintains context.
+2. **Avoiding Pollution**: Without projectPath, memories from different projects mix together.
+3. **Team Sync**: Workspace memory features rely on consistent project paths.
+
+**Common Mistake**: Using `{cwd}` or just the project name. These don't resolve correctly. Always use the full absolute path like `/path/to/your/project`.
 
 ## macOS Auto-Start (LaunchAgent)
 

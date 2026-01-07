@@ -437,17 +437,58 @@ export class BackendManager extends EventEmitter {
     // Use centralized prefix handling from backend
     const originalToolName = backend.unprefixToolName(toolName);
 
+    // CROSS-IDE FIX: Auto-inject projectPath for cipher tools if missing
+    // This ensures all IDEs (Claude Code, Cursor, Windsurf, Codex, VS Code, etc.)
+    // properly tag memories with projectPath for cross-IDE filtering
+    let processedArgs = args;
+    if (toolName.startsWith('cipher_') || originalToolName.startsWith('cipher_')) {
+      processedArgs = this.injectCipherProjectPath(args);
+    }
+
     const request: MCPRequest = {
       jsonrpc: '2.0',
       id: Date.now(),
       method: 'tools/call',
       params: {
         name: originalToolName,
-        arguments: args,
+        arguments: processedArgs,
       },
     };
 
     return backend.sendRequest(request, timeout);
+  }
+
+  /**
+   * Inject projectPath for cipher tools if not already provided
+   * Fallback order: existing arg > CIPHER_PROJECT_PATH env > PWD/cwd
+   */
+  private injectCipherProjectPath(args: unknown): unknown {
+    if (typeof args !== 'object' || args === null) {
+      return args;
+    }
+
+    const argsObj = args as Record<string, unknown>;
+
+    // Already has projectPath - don't override
+    if (argsObj.projectPath && typeof argsObj.projectPath === 'string' && argsObj.projectPath.trim()) {
+      return args;
+    }
+
+    // Try to get projectPath from environment or cwd
+    const projectPath =
+      process.env.CIPHER_PROJECT_PATH ||  // Explicit env var
+      process.env.PWD ||                   // Shell working directory
+      process.cwd();                       // Node process cwd
+
+    if (projectPath) {
+      logger.debug(`Auto-injecting projectPath for cipher tool: ${projectPath}`);
+      return {
+        ...argsObj,
+        projectPath,
+      };
+    }
+
+    return args;
   }
 
   /**

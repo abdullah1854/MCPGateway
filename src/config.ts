@@ -15,11 +15,31 @@ import {
 import { logger } from './logger.js';
 
 /**
+ * Gateway Settings - persisted gateway configuration
+ */
+export interface GatewaySettings {
+  liteMode: boolean; // Reduce gateway meta-tools from 30 to ~7 essential tools
+}
+
+/**
+ * Feature Flags - optional features that can be enabled/disabled
+ * These are read from environment variables and are useful for public deployments
+ * where users may not need all features (Cipher, Antigravity, Skills, etc.)
+ */
+export interface FeatureFlags {
+  skills: boolean;       // Skills system - reusable code patterns
+  cipher: boolean;       // Cipher Memory - cross-IDE persistent memory
+  antigravity: boolean;  // Antigravity Usage - IDE quota tracking
+  claudeUsage: boolean;  // Claude Usage - API token consumption tracking
+}
+
+/**
  * UI State - persisted tool/backend enabled/disabled selections
  */
 export interface UIState {
   disabledTools: string[];
   disabledBackends: string[];
+  gatewaySettings?: GatewaySettings;
 }
 
 const __filename = fileURLToPath(import.meta.url);
@@ -226,6 +246,7 @@ class ConfigManager {
   private serversConfigPath: string;
   private uiStatePath: string;
   private uiState: UIState;
+  private featureFlags: FeatureFlags;
 
   private constructor() {
     this.serversConfigPath = resolve(__dirname, '../config/servers.json');
@@ -233,6 +254,25 @@ class ConfigManager {
     this.gatewayConfig = loadGatewayConfig();
     this.serversConfig = loadServersConfig(this.serversConfigPath);
     this.uiState = this.loadUIState();
+    this.featureFlags = this.loadFeatureFlags();
+  }
+
+  /**
+   * Load feature flags from environment variables
+   * All optional features are disabled by default for clean public deployments
+   */
+  private loadFeatureFlags(): FeatureFlags {
+    const envToBool = (key: string): boolean => {
+      const val = process.env[key];
+      return val === '1' || val === 'true';
+    };
+
+    return {
+      skills: envToBool('ENABLE_SKILLS'),
+      cipher: envToBool('ENABLE_CIPHER'),
+      antigravity: envToBool('ENABLE_ANTIGRAVITY'),
+      claudeUsage: envToBool('ENABLE_CLAUDE_USAGE'),
+    };
   }
 
   static getInstance(): ConfigManager {
@@ -345,7 +385,11 @@ class ConfigManager {
    * Load UI state from file
    */
   private loadUIState(): UIState {
-    const defaultState: UIState = { disabledTools: [], disabledBackends: [] };
+    const defaultState: UIState = {
+      disabledTools: [],
+      disabledBackends: [],
+      gatewaySettings: { liteMode: false },
+    };
 
     if (!existsSync(this.uiStatePath)) {
       return defaultState;
@@ -357,6 +401,7 @@ class ConfigManager {
       return {
         disabledTools: Array.isArray(parsed.disabledTools) ? parsed.disabledTools : [],
         disabledBackends: Array.isArray(parsed.disabledBackends) ? parsed.disabledBackends : [],
+        gatewaySettings: parsed.gatewaySettings ?? { liteMode: false },
       };
     } catch (error) {
       logger.warn('Failed to load UI state, using defaults', { error });
@@ -405,6 +450,73 @@ class ConfigManager {
   updateDisabledBackends(disabledBackends: string[]): void {
     this.uiState.disabledBackends = disabledBackends;
     this.saveUIState(this.uiState);
+  }
+
+  /**
+   * Get gateway settings
+   */
+  getGatewaySettings(): GatewaySettings {
+    return this.uiState.gatewaySettings ?? { liteMode: false };
+  }
+
+  /**
+   * Update gateway settings and persist
+   */
+  updateGatewaySettings(settings: Partial<GatewaySettings>): void {
+    this.uiState.gatewaySettings = {
+      ...this.uiState.gatewaySettings,
+      liteMode: false, // default
+      ...settings,
+    };
+    this.saveUIState(this.uiState);
+    logger.info('Gateway settings updated', { settings: this.uiState.gatewaySettings });
+  }
+
+  /**
+   * Check if lite mode is enabled (from UI state or env var)
+   */
+  isLiteModeEnabled(): boolean {
+    // Environment variable takes precedence
+    if (process.env.GATEWAY_LITE_MODE === '1' || process.env.GATEWAY_LITE_MODE === 'true') {
+      return true;
+    }
+    // Fall back to UI state
+    return this.uiState.gatewaySettings?.liteMode ?? false;
+  }
+
+  /**
+   * Get all feature flags
+   */
+  getFeatureFlags(): FeatureFlags {
+    return this.featureFlags;
+  }
+
+  /**
+   * Check if Skills feature is enabled
+   */
+  isSkillsEnabled(): boolean {
+    return this.featureFlags.skills;
+  }
+
+  /**
+   * Check if Cipher Memory feature is enabled
+   */
+  isCipherEnabled(): boolean {
+    return this.featureFlags.cipher;
+  }
+
+  /**
+   * Check if Antigravity Usage feature is enabled
+   */
+  isAntigravityEnabled(): boolean {
+    return this.featureFlags.antigravity;
+  }
+
+  /**
+   * Check if Claude Usage feature is enabled
+   */
+  isClaudeUsageEnabled(): boolean {
+    return this.featureFlags.claudeUsage;
   }
 }
 

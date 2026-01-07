@@ -9,7 +9,7 @@
 import { BackendManager } from '../backend/index.js';
 import { ToolDiscovery, DetailLevel, TOOL_CATEGORIES } from './tool-discovery.js';
 import { CodeExecutor } from './executor.js';
-import { SkillsManager } from './skills.js';
+import { SkillsManager, isValidSkillName, SKILL_CATEGORIES, SkillCategory, Skill } from './skills.js';
 import { WorkspaceManager } from './workspace.js';
 import { Aggregations } from './streaming.js';
 import { getPIITokenizerForSession } from './pii-tokenizer.js';
@@ -20,6 +20,7 @@ import { getDeltaManager, DeltaResponseManager } from './delta-response.js';
 import { getContextTracker } from './context-tracker.js';
 import { summarizeResponse } from './response-summarizer.js';
 import { analyzeCode, getQueryPlanSummary } from './query-planner.js';
+import ConfigManager from '../config.js';
 
 /**
  * Estimate tokens for a given object (roughly 4 chars per token)
@@ -62,6 +63,7 @@ export interface GatewayToolsConfig {
   prefix?: string; // Default: 'gateway'
   enableCodeExecution?: boolean; // Default: true
   enableSkills?: boolean; // Default: true
+  liteMode?: boolean; // Default: false - Only expose essential tools to save ~20k tokens
 }
 
 /**
@@ -74,6 +76,9 @@ export function createGatewayTools(
   const prefix = config.prefix ?? 'gateway';
   const enableCodeExecution = config.enableCodeExecution ?? true;
   const enableSkills = config.enableSkills ?? true;
+  // Check lite mode from config parameter, ConfigManager, or env var
+  const configManager = ConfigManager.getInstance();
+  const liteMode = config.liteMode ?? configManager.isLiteModeEnabled();
 
   const toolDiscovery = new ToolDiscovery(backendManager);
   const codeExecutor = new CodeExecutor(backendManager);
@@ -208,71 +213,74 @@ export function createGatewayTools(
     ],
   });
 
-  tools.push({
-    name: `${prefix}_get_tool_schemas`,
-    description: 'Get schemas for multiple tools in a single request. More efficient than multiple get_tool_schema calls.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        toolNames: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Array of tool names to get schemas for (max 20)',
+  // Non-essential tools - only in full mode
+  if (!liteMode) {
+    tools.push({
+      name: `${prefix}_get_tool_schemas`,
+      description: 'Get schemas for multiple tools in a single request. More efficient than multiple get_tool_schema calls.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          toolNames: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Array of tool names to get schemas for (max 20)',
+          },
+          compact: {
+            type: 'boolean',
+            description: 'If true, returns schemas with types only (no descriptions). Saves ~40% tokens.',
+            default: false,
+          },
+          mode: {
+            type: 'string',
+            enum: ['full', 'compact', 'micro'],
+            description: 'Schema mode: full (default), compact (~40% savings), micro (~60-70% savings)',
+          },
         },
-        compact: {
-          type: 'boolean',
-          description: 'If true, returns schemas with types only (no descriptions). Saves ~40% tokens.',
-          default: false,
-        },
-        mode: {
-          type: 'string',
-          enum: ['full', 'compact', 'micro'],
-          description: 'Schema mode: full (default), compact (~40% savings), micro (~60-70% savings)',
-        },
+        required: ['toolNames'],
       },
-      required: ['toolNames'],
-    },
-    inputExamples: [
-      { toolNames: ['mssql_prod_execute_query', 'mssql_prod_get_schema'], mode: 'micro' },
-      { toolNames: ['mssql_prod_execute_query', 'mssql_prod_get_schema'], compact: true },
-    ],
-  });
+      inputExamples: [
+        { toolNames: ['mssql_prod_execute_query', 'mssql_prod_get_schema'], mode: 'micro' },
+        { toolNames: ['mssql_prod_execute_query', 'mssql_prod_get_schema'], compact: true },
+      ],
+    });
 
-  tools.push({
-    name: `${prefix}_get_tool_categories`,
-    description: 'Get available tool categories with tool counts. Use categories to filter tools in search_tools.',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-    },
-    inputExamples: [
-      {},
-    ],
-  });
+    tools.push({
+      name: `${prefix}_get_tool_categories`,
+      description: 'Get available tool categories with tool counts. Use categories to filter tools in search_tools.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+      },
+      inputExamples: [
+        {},
+      ],
+    });
 
-  tools.push({
-    name: `${prefix}_get_tool_tree`,
-    description: 'Get tools organized as a tree structure by backend. Useful for understanding the overall tool landscape.',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-    },
-    inputExamples: [
-      {},
-    ],
-  });
+    tools.push({
+      name: `${prefix}_get_tool_tree`,
+      description: 'Get tools organized as a tree structure by backend. Useful for understanding the overall tool landscape.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+      },
+      inputExamples: [
+        {},
+      ],
+    });
 
-  tools.push({
-    name: `${prefix}_get_tool_stats`,
-    description: 'Get statistics about available tools grouped by backend server.',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-    },
-    inputExamples: [
-      {},
-    ],
-  });
+    tools.push({
+      name: `${prefix}_get_tool_stats`,
+      description: 'Get statistics about available tools grouped by backend server.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+      },
+      inputExamples: [
+        {},
+      ],
+    });
+  }
 
   // ==================== Code Execution Tools ====================
 
@@ -367,102 +375,105 @@ export function createGatewayTools(
       ],
     });
 
-    tools.push({
-      name: `${prefix}_call_tool_aggregate`,
-      description: 'Call any tool and apply aggregation to reduce large result sets. Supports count, sum, avg, min, max, groupBy, distinct.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          toolName: {
-            type: 'string',
-            description: 'Name of the tool to call',
-          },
-          args: {
-            type: 'object',
-            description: 'Arguments to pass to the tool',
-          },
-          aggregation: {
-            type: 'object',
-            description: 'Aggregation to apply',
-            properties: {
-              operation: {
-                type: 'string',
-                enum: ['count', 'sum', 'avg', 'min', 'max', 'groupBy', 'distinct'],
-                description: 'Aggregation operation to perform',
-              },
-              field: {
-                type: 'string',
-                description: 'Field to aggregate on (required for sum, avg, min, max, distinct)',
-              },
-              groupByField: {
-                type: 'string',
-                description: 'Field to group by (for groupBy operation)',
-              },
+    // Non-essential code execution tools - only in full mode
+    if (!liteMode) {
+      tools.push({
+        name: `${prefix}_call_tool_aggregate`,
+        description: 'Call any tool and apply aggregation to reduce large result sets. Supports count, sum, avg, min, max, groupBy, distinct.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            toolName: {
+              type: 'string',
+              description: 'Name of the tool to call',
             },
-            required: ['operation'],
-          },
-        },
-        required: ['toolName', 'aggregation'],
-      },
-      inputExamples: [
-        {
-          toolName: 'database_execute_query',
-          args: { query: "SELECT status, COUNT(*) as cnt FROM orders GROUP BY status" },
-          aggregation: { operation: 'groupBy', groupByField: 'status' },
-        },
-      ],
-    });
-
-    tools.push({
-      name: `${prefix}_call_tools_parallel`,
-      description:
-        'Execute multiple tool calls in parallel with optional per-call result filtering to reduce response size.',
-      inputSchema: {
-        type: 'object',
-        properties: {
-          calls: {
-            type: 'array',
-            description: 'Array of tool calls to execute in parallel',
-            items: {
+            args: {
               type: 'object',
+              description: 'Arguments to pass to the tool',
+            },
+            aggregation: {
+              type: 'object',
+              description: 'Aggregation to apply',
               properties: {
-                toolName: { type: 'string' },
-                args: { type: 'object' },
-                filter: {
-                  type: 'object',
-                  description: 'Optional filter applied to this call result',
-                  properties: {
-                    maxRows: { type: 'number' },
-                    maxTokens: { type: 'number', description: 'Maximum approximate tokens in response' },
-                    fields: { type: 'array', items: { type: 'string' } },
-                    format: { type: 'string', enum: ['full', 'summary', 'sample'] },
+                operation: {
+                  type: 'string',
+                  enum: ['count', 'sum', 'avg', 'min', 'max', 'groupBy', 'distinct'],
+                  description: 'Aggregation operation to perform',
+                },
+                field: {
+                  type: 'string',
+                  description: 'Field to aggregate on (required for sum, avg, min, max, distinct)',
+                },
+                groupByField: {
+                  type: 'string',
+                  description: 'Field to group by (for groupBy operation)',
+                },
+              },
+              required: ['operation'],
+            },
+          },
+          required: ['toolName', 'aggregation'],
+        },
+        inputExamples: [
+          {
+            toolName: 'database_execute_query',
+            args: { query: "SELECT status, COUNT(*) as cnt FROM orders GROUP BY status" },
+            aggregation: { operation: 'groupBy', groupByField: 'status' },
+          },
+        ],
+      });
+
+      tools.push({
+        name: `${prefix}_call_tools_parallel`,
+        description:
+          'Execute multiple tool calls in parallel with optional per-call result filtering to reduce response size.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            calls: {
+              type: 'array',
+              description: 'Array of tool calls to execute in parallel',
+              items: {
+                type: 'object',
+                properties: {
+                  toolName: { type: 'string' },
+                  args: { type: 'object' },
+                  filter: {
+                    type: 'object',
+                    description: 'Optional filter applied to this call result',
+                    properties: {
+                      maxRows: { type: 'number' },
+                      maxTokens: { type: 'number', description: 'Maximum approximate tokens in response' },
+                      fields: { type: 'array', items: { type: 'string' } },
+                      format: { type: 'string', enum: ['full', 'summary', 'sample'] },
+                    },
+                  },
+                  smart: {
+                    type: 'boolean',
+                    description: 'Auto-apply summary filter when no filter provided. Set false for raw results.',
+                    default: true,
+                  },
+                  timeout: {
+                    type: 'number',
+                    description: 'Timeout in milliseconds for this specific call',
                   },
                 },
-                smart: {
-                  type: 'boolean',
-                  description: 'Auto-apply summary filter when no filter provided. Set false for raw results.',
-                  default: true,
-                },
-                timeout: {
-                  type: 'number',
-                  description: 'Timeout in milliseconds for this specific call',
-                },
+                required: ['toolName'],
               },
-              required: ['toolName'],
             },
           },
+          required: ['calls'],
         },
-        required: ['calls'],
-      },
-      inputExamples: [
-        {
-          calls: [
-            { toolName: 'gateway_search_tools', args: { query: 'mssql', limit: 5 }, smart: true },
-            { toolName: 'gateway_get_tool_stats', args: {} },
-          ],
-        },
-      ],
-    });
+        inputExamples: [
+          {
+            calls: [
+              { toolName: 'gateway_search_tools', args: { query: 'mssql', limit: 5 }, smart: true },
+              { toolName: 'gateway_get_tool_stats', args: {} },
+            ],
+          },
+        ],
+      });
+    }
   }
 
   // ==================== Skills Tools ====================
@@ -538,180 +549,372 @@ export function createGatewayTools(
       ],
     });
 
+    // Non-essential skills tools - only in full mode
+    if (!liteMode) {
+      tools.push({
+        name: `${prefix}_create_skill`,
+        description: 'Create a new reusable skill from code. Skills can be executed later with different inputs.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'Unique skill name (lowercase, hyphens allowed)',
+            },
+            description: {
+              type: 'string',
+              description: 'What this skill does',
+            },
+            code: {
+              type: 'string',
+              description: 'TypeScript/JavaScript code for the skill',
+            },
+            category: {
+              type: 'string',
+              enum: Object.keys(SKILL_CATEGORIES),
+              description: 'Skill category for organization',
+            },
+            inputs: {
+              type: 'array',
+              description: 'Input parameter definitions',
+              items: {
+                type: 'object',
+                properties: {
+                  name: { type: 'string' },
+                  type: { type: 'string', enum: ['string', 'number', 'boolean', 'object', 'array'] },
+                  description: { type: 'string' },
+                  required: { type: 'boolean', default: true },
+                },
+              },
+            },
+            tags: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Tags for categorizing the skill',
+            },
+            mcpDependencies: {
+              type: 'array',
+              description: 'MCP tools this skill depends on',
+              items: {
+                type: 'object',
+                properties: {
+                  toolPattern: { type: 'string', description: 'Tool name or pattern (e.g., "mssql_*")' },
+                  description: { type: 'string' },
+                  required: { type: 'boolean', default: true },
+                },
+              },
+            },
+            chainOfThought: {
+              type: 'string',
+              description: 'Thinking process guidance for the skill',
+            },
+            antiHallucination: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Rules to prevent hallucination',
+            },
+            verificationChecklist: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Verification steps after execution',
+            },
+          },
+          required: ['name', 'description', 'code'],
+        },
+        inputExamples: [
+          {
+            name: 'list-recent-orders',
+            description: 'Fetch recent orders and print a summary',
+            code: "const r = await callTool('database_query', { query: \"SELECT TOP 5 id, status FROM orders ORDER BY created_at DESC\" });\nconsole.log(r);",
+            inputs: [{ name: 'limit', type: 'number', description: 'Max rows to fetch', required: false }],
+            tags: ['database', 'query'],
+            category: 'database',
+          },
+        ],
+      });
+    }
+
+    // Enhanced skills tools - only in full mode
+    if (!liteMode) {
+      tools.push({
+        name: `${prefix}_get_skill_categories`,
+        description: 'Get all skill categories with descriptions and skill counts.',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+        inputExamples: [{}],
+      });
+
+      tools.push({
+        name: `${prefix}_search_skills_advanced`,
+        description: 'Advanced skill search with category, tags, and source filtering.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            query: {
+              type: 'string',
+              description: 'Search query for name/description',
+            },
+            category: {
+              type: 'string',
+              enum: Object.keys(SKILL_CATEGORIES),
+              description: 'Filter by category',
+            },
+            tags: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Filter by tags',
+            },
+            source: {
+              type: 'string',
+              enum: ['workspace', 'external', 'all'],
+              description: 'Filter by source (workspace skills vs external skills)',
+            },
+            limit: {
+              type: 'number',
+              description: 'Maximum results to return',
+            },
+          },
+        },
+        inputExamples: [
+          { category: 'code-quality' },
+          { query: 'git', source: 'external' },
+          { tags: ['productivity', 'automation'] },
+        ],
+      });
+
+      tools.push({
+        name: `${prefix}_execute_skill_chain`,
+        description: 'Execute multiple skills in sequence, passing outputs as inputs to the next skill.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            skillNames: {
+              type: 'array',
+              items: { type: 'string' },
+              description: 'Skill names to execute in order',
+            },
+            inputs: {
+              type: 'object',
+              description: 'Initial inputs for the first skill',
+            },
+          },
+          required: ['skillNames'],
+        },
+        inputExamples: [
+          { skillNames: ['code-review', 'git-smart-commit'], inputs: { language: 'typescript' } },
+        ],
+      });
+
+      tools.push({
+        name: `${prefix}_import_skill`,
+        description: 'Import an external skill from external-skills folder into the workspace for customization.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            name: {
+              type: 'string',
+              description: 'Name of the external skill to import',
+            },
+          },
+          required: ['name'],
+        },
+        inputExamples: [
+          { name: 'code-review' },
+          { name: 'git-smart-commit' },
+        ],
+      });
+
+      tools.push({
+        name: `${prefix}_sync_external_skills`,
+        description: 'Sync all external skills from external-skills folder to workspace.',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+        inputExamples: [{}],
+      });
+
+      tools.push({
+        name: `${prefix}_get_skill_templates`,
+        description: 'Get available skill templates for quick skill creation.',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+        inputExamples: [{}],
+      });
+
+      tools.push({
+        name: `${prefix}_create_skill_from_template`,
+        description: 'Create a new skill from a template with customizations.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            templateName: {
+              type: 'string',
+              description: 'Name of the template to use',
+            },
+            skillName: {
+              type: 'string',
+              description: 'Name for the new skill',
+            },
+            customizations: {
+              type: 'object',
+              description: 'Optional customizations (description, code, inputs, tags)',
+            },
+          },
+          required: ['templateName', 'skillName'],
+        },
+        inputExamples: [
+          { templateName: 'code-review-template', skillName: 'my-code-review' },
+          { templateName: 'git-commit-template', skillName: 'team-commit-style', customizations: { tags: ['team'] } },
+        ],
+      });
+
+      tools.push({
+        name: `${prefix}_get_external_paths`,
+        description: 'Get the external skills directories being monitored.',
+        inputSchema: {
+          type: 'object',
+          properties: {},
+        },
+        inputExamples: [{}],
+      });
+
+      tools.push({
+        name: `${prefix}_add_external_path`,
+        description: 'Add a new external skills directory to monitor.',
+        inputSchema: {
+          type: 'object',
+          properties: {
+            path: {
+              type: 'string',
+              description: 'Path to the external skills directory',
+            },
+          },
+          required: ['path'],
+        },
+        inputExamples: [
+          { path: './external-skills' },
+        ],
+      });
+    } // End of enhanced skills tools (!liteMode)
+  }
+
+  // ==================== Optimization Tools (non-essential, full mode only) ====================
+
+  if (!liteMode) {
     tools.push({
-      name: `${prefix}_create_skill`,
-      description: 'Create a new reusable skill from code. Skills can be executed later with different inputs.',
+      name: `${prefix}_get_optimization_stats`,
+      description: 'Get token optimization statistics for the current session including cache hits, duplicates avoided, and estimated savings.',
+      inputSchema: {
+        type: 'object',
+        properties: {},
+      },
+      inputExamples: [
+        {},
+      ],
+    });
+
+    tools.push({
+      name: `${prefix}_call_tool_delta`,
+      description: 'Call a tool with delta response - only returns changes since last call. Saves 90%+ tokens for repeated/polling queries.',
       inputSchema: {
         type: 'object',
         properties: {
-          name: {
+          toolName: {
             type: 'string',
-            description: 'Unique skill name (lowercase, hyphens allowed)',
+            description: 'Name of the tool to call',
           },
-          description: {
+          args: {
+            type: 'object',
+            description: 'Arguments to pass to the tool',
+          },
+          idField: {
             type: 'string',
-            description: 'What this skill does',
-          },
-          code: {
-            type: 'string',
-            description: 'TypeScript/JavaScript code for the skill',
-          },
-          inputs: {
-            type: 'array',
-            description: 'Input parameter definitions',
-            items: {
-              type: 'object',
-              properties: {
-                name: { type: 'string' },
-                type: { type: 'string', enum: ['string', 'number', 'boolean', 'object', 'array'] },
-                description: { type: 'string' },
-                required: { type: 'boolean', default: true },
-              },
-            },
-          },
-          tags: {
-            type: 'array',
-            items: { type: 'string' },
-            description: 'Tags for categorizing the skill',
+            description: 'For array results, the field to use as unique ID for smarter diffing (e.g., "id", "userId")',
           },
         },
-        required: ['name', 'description', 'code'],
+        required: ['toolName'],
       },
       inputExamples: [
-        {
-          name: 'list-recent-orders',
-          description: 'Fetch recent orders and print a summary',
-          code: "const r = await callTool('database_query', { query: \"SELECT TOP 5 id, status FROM orders ORDER BY created_at DESC\" });\nconsole.log(r);",
-          inputs: [{ name: 'limit', type: 'number', description: 'Max rows to fetch', required: false }],
-          tags: ['database', 'query'],
-        },
-        {
-          name: 'hello-world',
-          description: 'A simple greeting skill',
-          code: "console.log('Hello, ' + (inputs.name || 'World') + '!');",
-          inputs: [{ name: 'name', type: 'string', description: 'Name to greet' }],
-          tags: ['example'],
-        },
+        { toolName: 'database_query', args: { query: 'SELECT * FROM users WHERE active = 1' }, idField: 'id' },
+        { toolName: 'monitoring_get_status', args: {} },
       ],
     });
-  }
 
-  // ==================== Optimization Stats Tool ====================
-
-  tools.push({
-    name: `${prefix}_get_optimization_stats`,
-    description: 'Get token optimization statistics for the current session including cache hits, duplicates avoided, and estimated savings.',
-    inputSchema: {
-      type: 'object',
-      properties: {},
-    },
-    inputExamples: [
-      {},
-    ],
-  });
-
-  // ==================== Delta Response Tool ====================
-
-  tools.push({
-    name: `${prefix}_call_tool_delta`,
-    description: 'Call a tool with delta response - only returns changes since last call. Saves 90%+ tokens for repeated/polling queries.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        toolName: {
-          type: 'string',
-          description: 'Name of the tool to call',
-        },
-        args: {
-          type: 'object',
-          description: 'Arguments to pass to the tool',
-        },
-        idField: {
-          type: 'string',
-          description: 'For array results, the field to use as unique ID for smarter diffing (e.g., "id", "userId")',
+    tools.push({
+      name: `${prefix}_get_context_status`,
+      description: 'Get context window usage status including tokens used, warnings, and recommendations. Use this to monitor context and prevent overflow.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          contextLimit: {
+            type: 'number',
+            description: 'Override context limit (default: 128000 for Claude)',
+          },
         },
       },
-      required: ['toolName'],
-    },
-    inputExamples: [
-      { toolName: 'database_query', args: { query: 'SELECT * FROM users WHERE active = 1' }, idField: 'id' },
-      { toolName: 'monitoring_get_status', args: {} },
-    ],
-  });
+      inputExamples: [
+        {},
+        { contextLimit: 200000 },
+      ],
+    });
 
-  // ==================== Context Tracking Tool ====================
-
-  tools.push({
-    name: `${prefix}_get_context_status`,
-    description: 'Get context window usage status including tokens used, warnings, and recommendations. Use this to monitor context and prevent overflow.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        contextLimit: {
-          type: 'number',
-          description: 'Override context limit (default: 128000 for Claude)',
+    // Response Summarization Tool
+    tools.push({
+      name: `${prefix}_call_tool_summarized`,
+      description: 'Call a tool and auto-summarize large results. Extracts key insights, statistics, and sample data. Saves 60-90% tokens on large datasets.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          toolName: {
+            type: 'string',
+            description: 'Name of the tool to call',
+          },
+          args: {
+            type: 'object',
+            description: 'Arguments to pass to the tool',
+          },
+          maxTokens: {
+            type: 'number',
+            description: 'Maximum tokens for the summary (default: 500)',
+          },
+          focusFields: {
+            type: 'array',
+            items: { type: 'string' },
+            description: 'Fields to focus analysis on',
+          },
         },
+        required: ['toolName'],
       },
-    },
-    inputExamples: [
-      {},
-      { contextLimit: 200000 },
-    ],
-  });
+      inputExamples: [
+        { toolName: 'database_query', args: { query: 'SELECT * FROM orders' }, maxTokens: 300 },
+        { toolName: 'api_fetch', args: { url: '/users' }, focusFields: ['status', 'role'] },
+      ],
+    });
 
-  // ==================== Response Summarization Tool ====================
-
-  tools.push({
-    name: `${prefix}_call_tool_summarized`,
-    description: 'Call a tool and auto-summarize large results. Extracts key insights, statistics, and sample data. Saves 60-90% tokens on large datasets.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        toolName: {
-          type: 'string',
-          description: 'Name of the tool to call',
+    // Query Planning Tool
+    tools.push({
+      name: `${prefix}_analyze_code`,
+      description: 'Analyze code before execution to detect optimization opportunities like parallelization, redundant calls, and missing filters.',
+      inputSchema: {
+        type: 'object',
+        properties: {
+          code: {
+            type: 'string',
+            description: 'The code to analyze',
+          },
         },
-        args: {
-          type: 'object',
-          description: 'Arguments to pass to the tool',
-        },
-        maxTokens: {
-          type: 'number',
-          description: 'Maximum tokens for the summary (default: 500)',
-        },
-        focusFields: {
-          type: 'array',
-          items: { type: 'string' },
-          description: 'Fields to focus analysis on',
-        },
+        required: ['code'],
       },
-      required: ['toolName'],
-    },
-    inputExamples: [
-      { toolName: 'database_query', args: { query: 'SELECT * FROM orders' }, maxTokens: 300 },
-      { toolName: 'api_fetch', args: { url: '/users' }, focusFields: ['status', 'role'] },
-    ],
-  });
-
-  // ==================== Query Planning Tool ====================
-
-  tools.push({
-    name: `${prefix}_analyze_code`,
-    description: 'Analyze code before execution to detect optimization opportunities like parallelization, redundant calls, and missing filters.',
-    inputSchema: {
-      type: 'object',
-      properties: {
-        code: {
-          type: 'string',
-          description: 'The code to analyze',
-        },
-      },
-      required: ['code'],
-    },
-    inputExamples: [
-      { code: 'const users = await db.query("SELECT * FROM users");\nconst orders = await db.query("SELECT * FROM orders");' },
-    ],
-  });
+      inputExamples: [
+        { code: 'const users = await db.query("SELECT * FROM users");\nconst orders = await db.query("SELECT * FROM orders");' },
+      ],
+    });
+  } // End of non-essential optimization tools (!liteMode)
 
   // ==================== Tool Call Handler ====================
 
@@ -1026,6 +1229,9 @@ export function createGatewayTools(
 
     if (name === `${prefix}_get_skill` && enableSkills) {
       const skillName = params.name as string;
+      if (!isValidSkillName(skillName)) {
+        return { error: 'Invalid skill name' };
+      }
       const skill = skillsManager.getSkill(skillName);
       if (!skill) {
         return { error: `Skill '${skillName}' not found` };
@@ -1035,11 +1241,18 @@ export function createGatewayTools(
 
     if (name === `${prefix}_execute_skill` && enableSkills) {
       const skillName = params.name as string;
+      if (!isValidSkillName(skillName)) {
+        return { error: 'Invalid skill name' };
+      }
       const inputs = params.inputs as Record<string, unknown> || {};
       return await skillsManager.executeSkill(skillName, inputs, { sessionId: ctx?.sessionId });
     }
 
     if (name === `${prefix}_create_skill` && enableSkills) {
+      const skillName = params.name as string;
+      if (!isValidSkillName(skillName)) {
+        return { error: 'Invalid skill name' };
+      }
       const rawInputs = params.inputs as Array<{
         name: string;
         type: 'string' | 'number' | 'boolean' | 'object' | 'array';
@@ -1058,14 +1271,119 @@ export function createGatewayTools(
       }));
 
       const skill = skillsManager.createSkill({
-        name: params.name as string,
+        name: skillName,
         description: params.description as string,
         code: params.code as string,
         version: '1.0.0',
+        category: params.category as SkillCategory | undefined,
         inputs: normalizedInputs,
         tags: (params.tags as string[]) || [],
+        mcpDependencies: params.mcpDependencies as Array<{ toolPattern: string; description?: string; required: boolean }> || [],
+        chainOfThought: params.chainOfThought as string | undefined,
+        antiHallucination: params.antiHallucination as string[] || [],
+        verificationChecklist: params.verificationChecklist as string[] || [],
       });
       return { success: true, skill };
+    }
+
+    // Enhanced skills tools handlers
+    if (name === `${prefix}_get_skill_categories` && enableSkills) {
+      const stats = skillsManager.getCategoryStats();
+      const categories = Object.entries(SKILL_CATEGORIES).map(([key, value]) => ({
+        name: key,
+        description: value.description,
+        keywords: value.keywords,
+        skillCount: stats[key as SkillCategory] || 0,
+      }));
+      return { categories, total: Object.values(stats).reduce((a, b) => a + b, 0) };
+    }
+
+    if (name === `${prefix}_search_skills_advanced` && enableSkills) {
+      const skills = skillsManager.searchSkills({
+        query: params.query as string | undefined,
+        category: params.category as SkillCategory | undefined,
+        tags: params.tags as string[] | undefined,
+        source: params.source as 'workspace' | 'external' | 'all' | undefined,
+        limit: params.limit as number | undefined,
+      });
+      return { skills, count: skills.length };
+    }
+
+    if (name === `${prefix}_execute_skill_chain` && enableSkills) {
+      const skillNames = params.skillNames as string[];
+      const inputs = params.inputs as Record<string, unknown> || {};
+      const results = await skillsManager.executeSkillChain(skillNames, inputs, { sessionId: ctx?.sessionId });
+      return {
+        success: results.every(r => r.success),
+        results,
+        skillsExecuted: results.length,
+      };
+    }
+
+    if (name === `${prefix}_import_skill` && enableSkills) {
+      const skillName = params.name as string;
+      const skill = skillsManager.importSkill(skillName);
+      if (!skill) {
+        return { error: `Skill '${skillName}' not found or already in workspace` };
+      }
+      return { success: true, skill, message: `Imported '${skillName}' to workspace` };
+    }
+
+    if (name === `${prefix}_sync_external_skills` && enableSkills) {
+      const result = skillsManager.syncExternalSkills();
+      return {
+        success: true,
+        imported: result.imported,
+        failed: result.failed,
+        message: `Imported ${result.imported.length} skills, ${result.failed.length} failed`,
+      };
+    }
+
+    if (name === `${prefix}_get_skill_templates` && enableSkills) {
+      const templates = skillsManager.getTemplates();
+      return {
+        templates: templates.map(t => ({
+          name: t.name,
+          description: t.description,
+          category: t.category,
+          tags: t.tagsTemplate,
+          inputs: t.inputsTemplate,
+        })),
+        count: templates.length,
+      };
+    }
+
+    if (name === `${prefix}_create_skill_from_template` && enableSkills) {
+      const templateName = params.templateName as string;
+      const skillName = params.skillName as string;
+      const customizations = params.customizations as Partial<Skill> | undefined;
+
+      if (!isValidSkillName(skillName)) {
+        return { error: 'Invalid skill name' };
+      }
+
+      try {
+        const skill = skillsManager.createFromTemplate(templateName, skillName, customizations);
+        return { success: true, skill };
+      } catch (err) {
+        return { error: err instanceof Error ? err.message : String(err) };
+      }
+    }
+
+    if (name === `${prefix}_get_external_paths` && enableSkills) {
+      return {
+        paths: skillsManager.getExternalPaths(),
+        count: skillsManager.getExternalPaths().length,
+      };
+    }
+
+    if (name === `${prefix}_add_external_path` && enableSkills) {
+      const path = params.path as string;
+      const success = skillsManager.addExternalPath(path);
+      if (!success) {
+        return { error: `Path does not exist: ${path}` };
+      }
+      return { success: true, paths: skillsManager.getExternalPaths() };
     }
 
     // Delta Response Tool

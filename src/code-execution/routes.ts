@@ -16,7 +16,7 @@ import { ToolDiscovery, DetailLevel } from './tool-discovery.js';
 import { CodeExecutor } from './executor.js';
 import { Aggregations } from './streaming.js';
 import { WorkspaceManager } from './workspace.js';
-import { SkillsManager } from './skills.js';
+import { SkillsManager, isValidSkillName, SKILL_CATEGORIES, SkillCategory } from './skills.js';
 import { ResultCache } from './cache.js';
 import { getPIITokenizerForSession } from './pii-tokenizer.js';
 import { z } from 'zod';
@@ -71,12 +71,56 @@ const AggregationSchema = z.object({
   groupByField: z.string().optional(),
 });
 
+// MCP Dependency schema for skill tool requirements
+const MCPDependencySchema = z.object({
+  toolPattern: z.string().min(1).describe('Tool name or pattern (e.g., "mssql_*", "github_*")'),
+  description: z.string().optional(),
+  required: z.boolean().default(true),
+});
+
+// Workflow step schema for multi-step skills
+const WorkflowStepSchema = z.object({
+  id: z.string().min(1),
+  description: z.string().min(1),
+  toolsUsed: z.array(z.string()).optional(),
+  condition: z.string().optional().describe('Optional condition for execution'),
+});
+
+// Example schema for skill usage examples
+const SkillExampleSchema = z.object({
+  input: z.record(z.unknown()),
+  description: z.string().min(1),
+});
+
+// Skill categories matching SKILL_CATEGORIES in skills.ts
+const SkillCategoryEnum = z.enum([
+  'code-quality',
+  'git-workflow',
+  'database',
+  'api',
+  'documentation',
+  'testing',
+  'devops',
+  'productivity',
+  'analysis',
+  'domain-specific',
+  'memory',
+  'browser',
+]);
+
 const SkillSchema = z.object({
-  name: z.string().min(1).max(100),
+  // Core fields (required)
+  name: z.string().min(1).max(100).regex(/^[A-Za-z0-9][A-Za-z0-9_-]*$/),
   description: z.string().min(1).max(500),
+  code: z.string().min(1).max(100000),
+
+  // Basic metadata (optional with defaults)
   version: z.string().default('1.0.0'),
   author: z.string().optional(),
   tags: z.array(z.string()).default([]),
+  category: SkillCategoryEnum.optional(),
+
+  // Inputs definition
   inputs: z.array(z.object({
     name: z.string(),
     type: z.enum(['string', 'number', 'boolean', 'object', 'array']),
@@ -84,8 +128,24 @@ const SkillSchema = z.object({
     required: z.boolean().default(true),
     default: z.unknown().optional(),
   })).default([]),
-  code: z.string().min(1).max(100000),
+
+  // Enhanced metadata for Claude-style skills
+  mcpDependencies: z.array(MCPDependencySchema).optional()
+    .describe('MCP tools this skill depends on'),
+  workflow: z.array(WorkflowStepSchema).optional()
+    .describe('Multi-step workflow definition'),
+  chainOfThought: z.string().optional()
+    .describe('Thinking process guidance for the skill'),
+  antiHallucination: z.array(z.string()).optional()
+    .describe('Rules to prevent hallucination'),
+  verificationChecklist: z.array(z.string()).optional()
+    .describe('Verification steps after execution'),
+  examples: z.array(SkillExampleSchema).optional()
+    .describe('Usage examples with input/description'),
 });
+
+// Schema for partial updates (all fields optional except identifying ones)
+const SkillUpdateSchema = SkillSchema.partial().omit({ name: true });
 
 export function createCodeExecutionRoutes(backendManager: BackendManager): Router {
   const router = Router();
@@ -563,6 +623,201 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
     }
   });
 
+  // ==================== Enhanced Skills API (static routes first) ====================
+
+  /**
+   * GET /skills/categories
+   * Get all skill categories with counts
+   */
+  router.get('/skills/categories', (_req: Request, res: Response) => {
+    try {
+      const stats = skillsManager.getCategoryStats();
+      const categories = Object.entries(SKILL_CATEGORIES).map(([key, value]) => ({
+        name: key,
+        description: value.description,
+        keywords: value.keywords,
+        skillCount: stats[key as SkillCategory] || 0,
+      }));
+      res.json({ categories, total: Object.values(stats).reduce((a, b) => a + b, 0) });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to get skill categories',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  /**
+   * GET /skills/templates
+   * Get available skill templates
+   */
+  router.get('/skills/templates', (_req: Request, res: Response) => {
+    try {
+      const templates = skillsManager.getTemplates();
+      res.json({
+        templates: templates.map(t => ({
+          name: t.name,
+          description: t.description,
+          category: t.category,
+          tags: t.tagsTemplate,
+          inputs: t.inputsTemplate,
+        })),
+        count: templates.length,
+      });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to get skill templates',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  /**
+   * GET /skills/external-paths
+   * Get external skills directories
+   */
+  router.get('/skills/external-paths', (_req: Request, res: Response) => {
+    try {
+      const paths = skillsManager.getExternalPaths();
+      res.json({ paths, count: paths.length });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to get external paths',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  /**
+   * POST /skills/search/advanced
+   * Advanced skill search
+   */
+  router.post('/skills/search/advanced', (req: Request, res: Response) => {
+    try {
+      const { query, category, tags, source, limit } = req.body;
+      const skills = skillsManager.searchSkills({
+        query,
+        category: category as SkillCategory | undefined,
+        tags,
+        source,
+        limit,
+      });
+      res.json({ skills, count: skills.length });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to search skills',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  /**
+   * POST /skills/chain/execute
+   * Execute a chain of skills
+   */
+  router.post('/skills/chain/execute', async (req: Request, res: Response) => {
+    try {
+      const { skillNames, inputs = {} } = req.body;
+      if (!Array.isArray(skillNames) || skillNames.length === 0) {
+        res.status(400).json({ error: 'skillNames array is required' });
+        return;
+      }
+
+      const results = await skillsManager.executeSkillChain(skillNames, inputs, {
+        sessionId: getSessionId(req),
+      });
+
+      res.json({
+        success: results.every(r => r.success),
+        results,
+        skillsExecuted: results.length,
+      });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to execute skill chain',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  /**
+   * POST /skills/sync
+   * Sync all external skills to workspace
+   */
+  router.post('/skills/sync', (_req: Request, res: Response) => {
+    try {
+      const result = skillsManager.syncExternalSkills();
+      res.json({
+        success: true,
+        imported: result.imported,
+        failed: result.failed,
+        message: `Imported ${result.imported.length} skills, ${result.failed.length} failed`,
+      });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to sync skills',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  /**
+   * POST /skills/from-template
+   * Create a skill from a template
+   */
+  router.post('/skills/from-template', (req: Request, res: Response) => {
+    try {
+      const { templateName, skillName, customizations } = req.body;
+
+      if (!templateName || !skillName) {
+        res.status(400).json({ error: 'templateName and skillName are required' });
+        return;
+      }
+
+      if (!isValidSkillName(skillName)) {
+        res.status(400).json({ error: 'Invalid skill name' });
+        return;
+      }
+
+      const skill = skillsManager.createFromTemplate(templateName, skillName, customizations);
+      res.status(201).json({ success: true, skill });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to create skill from template',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  /**
+   * POST /skills/external-paths
+   * Add an external skills directory
+   */
+  router.post('/skills/external-paths', (req: Request, res: Response) => {
+    try {
+      const { path } = req.body;
+      if (!path) {
+        res.status(400).json({ error: 'path is required' });
+        return;
+      }
+
+      const success = skillsManager.addExternalPath(path);
+      if (!success) {
+        res.status(400).json({ error: `Path does not exist: ${path}` });
+        return;
+      }
+
+      res.json({ success: true, paths: skillsManager.getExternalPaths() });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to add external path',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  // ==================== Parameterized Skills Routes ====================
+
   /**
    * GET /skills/:name
    * Get a specific skill
@@ -570,6 +825,10 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
   router.get('/skills/:name', (req: Request, res: Response) => {
     try {
       const { name } = req.params;
+      if (!isValidSkillName(name)) {
+        res.status(400).json({ error: 'Invalid skill name' });
+        return;
+      }
       const skill = skillsManager.getSkill(name);
 
       if (!skill) {
@@ -614,13 +873,26 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
   /**
    * POST /skills/:name/execute
    * Execute a skill with inputs
+   * Body: { inputs: object, timeout?: number (ms, 1000-120000) }
    */
   router.post('/skills/:name/execute', async (req: Request, res: Response) => {
     try {
       const { name } = req.params;
-      const { inputs = {} } = req.body;
+      if (!isValidSkillName(name)) {
+        res.status(400).json({ error: 'Invalid skill name' });
+        return;
+      }
+      const { inputs = {}, timeout } = req.body;
 
-      const result = await skillsManager.executeSkill(name, inputs, { sessionId: getSessionId(req) });
+      // Validate timeout if provided (1s to 2min)
+      const validTimeout = typeof timeout === 'number' && timeout >= 1000 && timeout <= 120000
+        ? timeout
+        : undefined;
+
+      const result = await skillsManager.executeSkill(name, inputs, {
+        sessionId: getSessionId(req),
+        timeout: validTimeout,
+      });
       res.json(result);
     } catch (error) {
       res.status(500).json({
@@ -638,6 +910,10 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
   router.delete('/skills/:name', (req: Request, res: Response) => {
     try {
       const { name } = req.params;
+      if (!isValidSkillName(name)) {
+        res.status(400).json({ error: 'Invalid skill name' });
+        return;
+      }
       const deleted = skillsManager.deleteSkill(name);
 
       if (!deleted) {
@@ -649,6 +925,90 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
     } catch (error) {
       res.status(500).json({
         error: 'Failed to delete skill',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  /**
+   * PATCH /skills/:name
+   * Update an existing skill (partial update)
+   */
+  router.patch('/skills/:name', (req: Request, res: Response) => {
+    try {
+      const { name } = req.params;
+      if (!isValidSkillName(name)) {
+        res.status(400).json({ error: 'Invalid skill name' });
+        return;
+      }
+
+      // Check if skill exists
+      const existingSkill = skillsManager.getSkill(name);
+      if (!existingSkill) {
+        res.status(404).json({ error: `Skill '${name}' not found` });
+        return;
+      }
+
+      // External skills cannot be updated directly
+      if (existingSkill.source === 'external') {
+        res.status(400).json({
+          error: 'Cannot update external skill directly. Import it first with POST /skills/:name/import',
+        });
+        return;
+      }
+
+      // Validate partial update data
+      const parseResult = SkillUpdateSchema.safeParse(req.body);
+      if (!parseResult.success) {
+        res.status(400).json({
+          error: 'Invalid skill update data',
+          details: parseResult.error.errors,
+        });
+        return;
+      }
+
+      const updates = parseResult.data;
+      const updatedSkill = skillsManager.updateSkill(name, updates);
+
+      if (!updatedSkill) {
+        res.status(500).json({ error: 'Failed to update skill' });
+        return;
+      }
+
+      res.json({
+        success: true,
+        skill: updatedSkill,
+      });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to update skill',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
+
+  /**
+   * POST /skills/:name/import
+   * Import an external skill to workspace
+   */
+  router.post('/skills/:name/import', (req: Request, res: Response) => {
+    try {
+      const { name } = req.params;
+      if (!isValidSkillName(name)) {
+        res.status(400).json({ error: 'Invalid skill name' });
+        return;
+      }
+
+      const skill = skillsManager.importSkill(name);
+      if (!skill) {
+        res.status(404).json({ error: `Skill '${name}' not found or already in workspace` });
+        return;
+      }
+
+      res.json({ success: true, skill, message: `Imported '${name}' to workspace` });
+    } catch (error) {
+      res.status(500).json({
+        error: 'Failed to import skill',
         message: error instanceof Error ? error.message : String(error),
       });
     }

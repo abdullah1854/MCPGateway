@@ -5,9 +5,11 @@
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
-    "build": "tsc",
+    "build": "./scripts/build.sh",
+    "build:quick": "tsc",
     "dev": "tsx watch src/index.ts",
     "start": "node dist/index.js",
+    "restart": "launchctl stop com.mcp-gateway && launchctl start com.mcp-gateway",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit"
   },

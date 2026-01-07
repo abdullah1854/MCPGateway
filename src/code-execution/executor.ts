@@ -269,12 +269,70 @@ export class CodeExecutor {
       NaN: Number.NaN,
     });
 
-    // Safe Date - only allow creating new dates, not accessing constructor
-    const safeDate = deepFreeze({
-      now: createSafeWrapper(() => Date.now()),
-      parse: createSafeWrapper((dateString: string) => Date.parse(dateString)),
-      UTC: createSafeWrapper((...args: number[]) => Date.UTC(...(args as Parameters<typeof Date.UTC>))),
+    // Safe Date - allows `new Date()` while preventing constructor escapes
+    // Returns a safe wrapper object with common date methods wrapped via createSafeWrapper
+    function SafeDate(...args: unknown[]): object {
+      const realDate = args.length === 0
+        ? new Date()
+        : new Date(...(args as ConstructorParameters<typeof Date>));
+
+      // Create a safe wrapper that exposes date methods without leaking constructor
+      // All methods are wrapped with createSafeWrapper for consistent security model
+      const wrapper = {
+        getTime: createSafeWrapper(() => realDate.getTime()),
+        getFullYear: createSafeWrapper(() => realDate.getFullYear()),
+        getMonth: createSafeWrapper(() => realDate.getMonth()),
+        getDate: createSafeWrapper(() => realDate.getDate()),
+        getDay: createSafeWrapper(() => realDate.getDay()),
+        getHours: createSafeWrapper(() => realDate.getHours()),
+        getMinutes: createSafeWrapper(() => realDate.getMinutes()),
+        getSeconds: createSafeWrapper(() => realDate.getSeconds()),
+        getMilliseconds: createSafeWrapper(() => realDate.getMilliseconds()),
+        getUTCFullYear: createSafeWrapper(() => realDate.getUTCFullYear()),
+        getUTCMonth: createSafeWrapper(() => realDate.getUTCMonth()),
+        getUTCDate: createSafeWrapper(() => realDate.getUTCDate()),
+        getUTCDay: createSafeWrapper(() => realDate.getUTCDay()),
+        getUTCHours: createSafeWrapper(() => realDate.getUTCHours()),
+        getUTCMinutes: createSafeWrapper(() => realDate.getUTCMinutes()),
+        getUTCSeconds: createSafeWrapper(() => realDate.getUTCSeconds()),
+        getUTCMilliseconds: createSafeWrapper(() => realDate.getUTCMilliseconds()),
+        getTimezoneOffset: createSafeWrapper(() => realDate.getTimezoneOffset()),
+        toISOString: createSafeWrapper(() => realDate.toISOString()),
+        toJSON: createSafeWrapper(() => realDate.toJSON()),
+        toDateString: createSafeWrapper(() => realDate.toDateString()),
+        toTimeString: createSafeWrapper(() => realDate.toTimeString()),
+        toLocaleDateString: createSafeWrapper((...localeArgs: unknown[]) => realDate.toLocaleDateString(...(localeArgs as Parameters<typeof realDate.toLocaleDateString>))),
+        toLocaleTimeString: createSafeWrapper((...localeArgs: unknown[]) => realDate.toLocaleTimeString(...(localeArgs as Parameters<typeof realDate.toLocaleTimeString>))),
+        toLocaleString: createSafeWrapper((...localeArgs: unknown[]) => realDate.toLocaleString(...(localeArgs as Parameters<typeof realDate.toLocaleString>))),
+        toString: createSafeWrapper(() => realDate.toString()),
+        valueOf: createSafeWrapper(() => realDate.valueOf()),
+      };
+
+      // Hide constructor to prevent escape
+      Object.defineProperty(wrapper, 'constructor', {
+        value: undefined,
+        writable: false,
+        configurable: false,
+        enumerable: false,
+      });
+
+      return Object.freeze(wrapper);
+    }
+
+    // Add static methods to SafeDate
+    (SafeDate as unknown as Record<string, unknown>).now = createSafeWrapper(() => Date.now());
+    (SafeDate as unknown as Record<string, unknown>).parse = createSafeWrapper((dateString: string) => Date.parse(dateString));
+    (SafeDate as unknown as Record<string, unknown>).UTC = createSafeWrapper((...args: number[]) => Date.UTC(...(args as Parameters<typeof Date.UTC>)));
+
+    // Hide SafeDate's own constructor
+    Object.defineProperty(SafeDate, 'constructor', {
+      value: undefined,
+      writable: false,
+      configurable: false,
+      enumerable: false,
     });
+
+    const safeDate = Object.freeze(SafeDate);
 
     // Wrap tool functions to prevent constructor access
     // Return values are sanitized to prevent prototype chain access
@@ -463,6 +521,14 @@ export class CodeExecutor {
       },
     });
 
+    const timeoutMs = Number.isFinite(timeout) ? Math.max(timeout, 1) : this.defaultTimeout;
+    let timeoutId: NodeJS.Timeout | null = null;
+    const timeoutPromise = new Promise<never>((_, reject) => {
+      timeoutId = setTimeout(() => {
+        reject(new Error(`Execution timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+    });
+
     try {
       // Wrap code in async function to support await
       // Also add a preamble that blocks common escape attempts
@@ -480,13 +546,12 @@ export class CodeExecutor {
         filename: 'user-code.js',
       });
 
-      const result = await script.runInContext(vmContext, {
-        timeout: timeout,
+      const runPromise = script.runInContext(vmContext, {
+        timeout: timeoutMs,
         breakOnSigint: true,
       });
-
-      // Wait for the async result
-      const returnValue = await result;
+      // Apply a wall-clock timeout so async awaits can't hang indefinitely.
+      const returnValue = await Promise.race([runPromise, timeoutPromise]);
 
       const sanitizedReturnValue = this.sanitizeReturnValue(returnValue);
       const tokenizedReturnValue = tokenizer
@@ -509,6 +574,10 @@ export class CodeExecutor {
         error: errorMessage,
         executionTime: Date.now() - startTime,
       };
+    } finally {
+      if (timeoutId) {
+        clearTimeout(timeoutId);
+      }
     }
   }
 
