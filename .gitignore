@@ -38,6 +38,8 @@ logs/
 *.swo
 *.code-workspace
 .DS_Store
+.cursorrules
+.windsurfrules
 
 # Test coverage
 coverage/
@@ -45,6 +47,10 @@ coverage/
 # Temporary files
 *.tmp
 *.temp
+
+# Empirica (IDE/tool related)
+.empirica/
+.empirica_reflex_logs/
 
 # User-specific files (contain local paths)
 start.sh
@@ -54,3 +60,7 @@ com.mcp-gateway.plist
 
 # Workspace (contains user session data)
 workspace/
+
+# Brainstorm and analysis files
+BrainStorm/
+SKILL-REDUNDANCY-REPORT.md

@@ -1308,17 +1308,30 @@ function getDashboardHTML(): string {
       opacity: 1;
     }
 
-    .stat:nth-child(1) .stat-value { background: linear-gradient(135deg, #34d399, #10b981); }
-    .stat:nth-child(2) .stat-value { background: linear-gradient(135deg, #8b5cf6, #a78bfa); }
-    .stat:nth-child(3) .stat-value { background: linear-gradient(135deg, #22d3ee, #67e8f9); }
-
     .stat-value {
       font-size: 1.5rem;
       font-weight: 700;
+      line-height: 1.2;
+      color: #fff;
+    }
+
+    .stat:nth-child(1) .stat-value { 
+      background: linear-gradient(135deg, #34d399, #10b981);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
-      line-height: 1.2;
+    }
+    .stat:nth-child(2) .stat-value { 
+      background: linear-gradient(135deg, #8b5cf6, #a78bfa);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .stat:nth-child(3) .stat-value { 
+      background: linear-gradient(135deg, #22d3ee, #67e8f9);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
     }
 
     .stat-label {
@@ -4615,11 +4628,25 @@ function getDashboardHTML(): string {
     }
     
     function updateStats() {
-      const enabledTools = tools.filter(t => t.enabled);
-      document.getElementById('enabled-count').textContent = enabledTools.length;
-      document.getElementById('total-count').textContent = tools.length;
-      document.getElementById('backends-count').textContent = 
-        backends.filter(b => b.status === 'connected').length + '/' + backends.length;
+      try {
+        const enabledTools = tools.filter(t => t.enabled);
+        const enabledCountEl = document.getElementById('enabled-count');
+        const totalCountEl = document.getElementById('total-count');
+        const backendsCountEl = document.getElementById('backends-count');
+        
+        if (enabledCountEl) {
+          enabledCountEl.textContent = enabledTools.length.toString();
+        }
+        if (totalCountEl) {
+          totalCountEl.textContent = tools.length.toString();
+        }
+        if (backendsCountEl) {
+          const connectedCount = backends.filter(b => b.status === 'connected').length;
+          backendsCountEl.textContent = \`\${connectedCount}/\${backends.length}\`;
+        }
+      } catch (err) {
+        console.error('Failed to update stats:', err);
+      }
     }
     
     function renderFilters() {
@@ -5405,8 +5432,11 @@ function getDashboardHTML(): string {
       if (usageSummaryCard) usageSummaryCard.style.display = featureFlags.claudeUsage ? '' : 'none';
     }
 
-    // Load feature flags on page load
-    loadFeatureFlags();
+    // Load feature flags on page load, then initialize overview
+    loadFeatureFlags().then(() => {
+      // Ensure feature flags are loaded before initializing overview
+      initializeOverview();
+    });
 
     // ==========================================
     // Tab Navigation
@@ -5465,30 +5495,56 @@ function getDashboardHTML(): string {
     // Overview Tab Data Loading
     // ==========================================
     async function loadOverviewData() {
-      // Load quick stats
-      await loadOverviewQuickStats();
+      try {
+        // Load quick stats (this also updates header stats)
+        await loadOverviewQuickStats();
 
-      // Load backend health
-      await loadOverviewBackendHealth();
+        // Load backend health
+        await loadOverviewBackendHealth();
 
-      // Load recent memories (only if cipher feature is enabled)
-      if (featureFlags.cipher) {
-        await loadOverviewRecentMemories();
+        // Load recent memories (only if cipher feature is enabled)
+        if (featureFlags.cipher) {
+          try {
+            await loadOverviewRecentMemories();
+          } catch (err) {
+            console.warn('Failed to load recent memories (feature may be disabled):', err);
+          }
+        }
+
+        // Load skills list (only if skills feature is enabled)
+        if (featureFlags.skills) {
+          try {
+            await loadOverviewSkills();
+          } catch (err) {
+            console.warn('Failed to load skills (feature may be disabled):', err);
+          }
+        }
+
+        // Load usage summary (only if Claude usage feature is enabled)
+        if (featureFlags.claudeUsage) {
+          try {
+            await loadOverviewUsageSummary();
+          } catch (err) {
+            console.warn('Failed to load usage summary (feature may be disabled):', err);
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load overview data:', err);
       }
+    }
 
-      // Load skills list (only if skills feature is enabled)
-      if (featureFlags.skills) {
-        await loadOverviewSkills();
-      }
-
-      // Load usage summary (only if Claude usage feature is enabled)
-      if (featureFlags.claudeUsage) {
-        await loadOverviewUsageSummary();
+    // Initialize overview page (called after feature flags are loaded)
+    function initializeOverview() {
+      if (!overviewLoaded) {
+        loadOverviewData();
+        overviewLoaded = true;
       }
     }
 
     async function loadOverviewQuickStats() {
       const container = document.getElementById('overview-quick-stats');
+      let stats = null;
+      
       try {
         // Always fetch stats, conditionally fetch skills
         const fetchPromises = [fetch('/dashboard/api/stats')];
@@ -5497,11 +5553,20 @@ function getDashboardHTML(): string {
         }
 
         const responses = await Promise.all(fetchPromises);
-        const stats = await responses[0].json();
+        
+        // Check if stats response is ok
+        if (!responses[0].ok) {
+          throw new Error(\`Stats API returned \${responses[0].status}\`);
+        }
+        
+        stats = await responses[0].json();
         const skillsData = featureFlags.skills ? await responses[1].json() : { skills: [] };
 
         const backendCount = Object.keys(stats.backends || {}).length;
         const skillCount = (skillsData.skills || []).length;
+
+        // Update header stats (always, even if display fails)
+        updateHeaderStats(stats);
 
         // Build stats HTML, conditionally including skills stat
         const skillsStatHtml = featureFlags.skills ? \`
@@ -5548,7 +5613,77 @@ function getDashboardHTML(): string {
         \`;
       } catch (err) {
         console.error('Failed to load overview stats:', err);
-        container.innerHTML = '<div class="overview-empty">Failed to load stats</div>';
+        
+        // Try to update header stats using fallback method (from tools/backends API)
+        try {
+          await updateHeaderStatsFallback();
+        } catch (fallbackErr) {
+          console.warn('Fallback header stats update also failed:', fallbackErr);
+        }
+        
+        if (container) {
+          container.innerHTML = '<div class="overview-empty">Failed to load stats</div>';
+        }
+      }
+    }
+    
+    // Fallback method to update header stats using tools/backends API
+    async function updateHeaderStatsFallback() {
+      try {
+        const [backendsRes, toolsRes] = await Promise.all([
+          fetch('/dashboard/api/backends'),
+          fetch('/dashboard/api/tools')
+        ]);
+        
+        if (!backendsRes.ok || !toolsRes.ok) {
+          throw new Error('API calls failed');
+        }
+        
+        const backends = (await backendsRes.json()).backends || [];
+        const tools = (await toolsRes.json()).tools || [];
+        
+        const enabledTools = tools.filter(t => t.enabled);
+        const connectedBackends = backends.filter(b => b.status === 'connected').length;
+        
+        const enabledCountEl = document.getElementById('enabled-count');
+        const totalCountEl = document.getElementById('total-count');
+        const backendsCountEl = document.getElementById('backends-count');
+        
+        if (enabledCountEl) {
+          enabledCountEl.textContent = enabledTools.length.toString();
+        }
+        if (totalCountEl) {
+          totalCountEl.textContent = tools.length.toString();
+        }
+        if (backendsCountEl) {
+          backendsCountEl.textContent = \`\${connectedBackends}/\${backends.length}\`;
+        }
+      } catch (err) {
+        console.error('Fallback header stats update failed:', err);
+        throw err;
+      }
+    }
+
+    // Update header stats (enabled tools, total tools, backends)
+    function updateHeaderStats(stats) {
+      try {
+        const enabledCountEl = document.getElementById('enabled-count');
+        const totalCountEl = document.getElementById('total-count');
+        const backendsCountEl = document.getElementById('backends-count');
+
+        if (enabledCountEl) {
+          enabledCountEl.textContent = (stats.enabledTools || 0).toString();
+        }
+        if (totalCountEl) {
+          totalCountEl.textContent = (stats.totalTools || 0).toString();
+        }
+        if (backendsCountEl && stats.backends) {
+          const backendIds = Object.keys(stats.backends);
+          const connectedCount = backendIds.filter(id => stats.backends[id]?.status === 'connected').length;
+          backendsCountEl.textContent = \`\${connectedCount}/\${backendIds.length}\`;
+        }
+      } catch (err) {
+        console.warn('Failed to update header stats:', err);
       }
     }
 
@@ -7077,10 +7212,19 @@ function getDashboardHTML(): string {
       }
     }
 
-    // Initial load
-    loadData();
-    loadOverviewData();
-    overviewLoaded = true;
+    // Initial load - update header stats immediately
+    loadData().then(() => {
+      // Header stats are updated by loadData() -> updateStats()
+      // This ensures header shows counts even if overview stats fail
+    }).catch(err => {
+      console.error('Failed to load initial data:', err);
+      // Try to update header stats using stats API as fallback
+      updateHeaderStatsFallback().catch(() => {
+        console.error('All header stats update methods failed');
+      });
+    });
+    
+    // Overview data will be loaded after feature flags are loaded (see loadFeatureFlags above)
     checkAntigravityAvailable();
 
     // Refresh servers every 30 seconds
