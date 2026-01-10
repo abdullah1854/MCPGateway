@@ -331,7 +331,7 @@ export class SkillsManager {
             }
           });
           this.watchers.push(watcher);
-        } catch (err) {
+        } catch {
           logger.warn(`Could not watch skills directory: ${watchPath}`);
         }
       }
@@ -521,7 +521,9 @@ export class SkillsManager {
     writeFileSync(join(skillDir, 'index.ts'), skill.code, 'utf-8');
 
     // Save skill.json with metadata (exclude code and sourcePath for portability)
-    const { code: _code, sourcePath: _sourcePath, ...metadata } = fullSkill;
+    const metadata: Record<string, unknown> = { ...fullSkill };
+    delete metadata.code;
+    delete metadata.sourcePath;
     writeFileSync(
       join(skillDir, 'skill.json'),
       JSON.stringify(metadata, null, 2),
@@ -571,7 +573,9 @@ export class SkillsManager {
     writeFileSync(join(skillDir, 'SKILL.md'), skillMd, 'utf-8');
 
     // Exclude code and sourcePath for portability
-    const { code: _code, sourcePath: _sourcePath, ...metadata } = updatedSkill;
+    const metadata: Record<string, unknown> = { ...updatedSkill };
+    delete metadata.code;
+    delete metadata.sourcePath;
     writeFileSync(
       join(skillDir, 'skill.json'),
       JSON.stringify(metadata, null, 2),
@@ -818,7 +822,7 @@ export class SkillsManager {
         try {
           this.importSkill(skill.name);
           imported.push(skill.name);
-        } catch (err) {
+        } catch {
           failed.push(skill.name);
         }
       }

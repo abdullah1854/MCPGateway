@@ -259,6 +259,26 @@ http://your-gateway-host:3010/mcp
 
 > **Note:** Claude requires adding remote servers through the UI, not config files.
 
+#### Claude Desktop via STDIO Proxy
+
+If Claude Desktop doesn't support HTTP/SSE transports directly, you can use the included STDIO proxy script:
+
+```json
+{
+  "mcpServers": {
+    "mcp-gateway": {
+      "command": "node",
+      "args": ["/path/to/mcp-gateway/scripts/claude-stdio-proxy.mjs"],
+      "env": {
+        "MCP_GATEWAY_URL": "http://localhost:3010/mcp"
+      }
+    }
+  }
+}
+```
+
+The proxy (`scripts/claude-stdio-proxy.mjs`) reads JSON-RPC messages from stdin, forwards them to the gateway HTTP endpoint, and writes responses to stdout. It automatically manages session IDs.
+
 ### Cursor
 
 1. Open Cursor → **Settings** → **Features** → **MCP**
@@ -1536,6 +1556,66 @@ launchctl unload ~/Library/LaunchAgents/com.mcp-gateway.plist
 
 # Restart the service
 launchctl kickstart -k gui/$(id -u)/com.mcp-gateway
+```
+
+## Windows Setup
+
+### Running the Gateway
+
+```powershell
+# Install dependencies
+npm install
+
+# Development mode
+npm run dev
+
+# Production
+npm run build
+npm start
+```
+
+### Windows Auto-Start (Task Scheduler)
+
+To run the gateway automatically on Windows startup:
+
+1. Open **Task Scheduler** (`taskschd.msc`)
+2. Click **Create Task** (not Basic Task)
+3. Configure:
+   - **General tab**: Name it `MCP Gateway`, check "Run whether user is logged on or not"
+   - **Triggers tab**: Add trigger → "At startup"
+   - **Actions tab**: Add action:
+     - Program: `node` (or full path like `C:\Program Files\nodejs\node.exe`)
+     - Arguments: `dist/index.js`
+     - Start in: `C:\path\to\mcp-gateway`
+   - **Settings tab**: Check "Allow task to be run on demand"
+
+Alternatively, use the `start.example.sh` pattern adapted for PowerShell:
+
+```powershell
+# start-gateway.ps1
+$env:NODE_ENV = "production"
+$env:PORT = "3010"
+
+Set-Location "C:\path\to\mcp-gateway"
+
+while ($true) {
+    Write-Host "Starting MCP Gateway..."
+    node dist/index.js
+    Write-Host "Gateway stopped. Restarting in 5 seconds..."
+    Start-Sleep -Seconds 5
+}
+```
+
+### Windows Service (NSSM)
+
+For a proper Windows service, use [NSSM](https://nssm.cc/):
+
+```powershell
+# Install NSSM, then:
+nssm install MCPGateway "C:\Program Files\nodejs\node.exe" "C:\path\to\mcp-gateway\dist\index.js"
+nssm set MCPGateway AppDirectory "C:\path\to\mcp-gateway"
+nssm set MCPGateway AppEnvironmentExtra "NODE_ENV=production" "PORT=3010"
+nssm start MCPGateway
 ```
 
 ## Development
