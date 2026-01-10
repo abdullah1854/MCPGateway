@@ -528,6 +528,412 @@ These variables are only needed when the corresponding feature is enabled:
 | `QDRANT_COLLECTION` | Cipher | `cipher_knowledge` | Qdrant collection name |
 | `QDRANT_TIMEOUT_MS` | Cipher | `8000` | Qdrant request timeout |
 
+## Optional Features Guide
+
+This section provides detailed instructions for enabling and using each optional feature.
+
+---
+
+### Skills System (`ENABLE_SKILLS=1`)
+
+The Skills system allows you to save and reuse code patterns for zero-shot execution. Skills are the **most powerful token-saving feature** in MCP Gateway, reducing token usage by 95%+ for recurring tasks.
+
+#### What Skills Do
+
+- **Save successful code patterns** as reusable templates
+- **Execute complex workflows** with a single tool call (~20 tokens)
+- **Eliminate prompt engineering** for recurring tasks
+- **Hot-reload** when skill files change on disk
+
+#### Enabling Skills
+
+```bash
+# In your .env file
+ENABLE_SKILLS=1
+```
+
+#### Storage Locations
+
+Skills are stored in two directories:
+- `workspace/skills/` - User-created skills (editable)
+- `external-skills/` - Shared/imported skills (read-only by default)
+
+Each skill is a directory containing:
+```
+my-skill/
+├── skill.json    # Metadata (name, description, inputs, tags)
+├── index.ts      # Executable TypeScript code
+└── SKILL.md      # Auto-generated documentation
+```
+
+#### Creating Skills via MCP Tools
+
+```javascript
+// Create a new skill
+await gateway_create_skill({
+  name: "daily-report",
+  description: "Generate daily sales summary by region",
+  code: `
+    const sales = await mssql.executeQuery({
+      query: \`SELECT region, SUM(amount) as total 
+              FROM orders WHERE date = '\${date}' GROUP BY region\`
+    });
+    console.log(JSON.stringify(sales));
+  `,
+  inputs: [
+    { name: "date", type: "string", required: true, description: "Date in YYYY-MM-DD format" }
+  ],
+  tags: ["reporting", "sales", "daily"]
+});
+```
+
+#### Executing Skills
+
+```javascript
+// Execute with ~20 tokens instead of 500+ for raw code
+await gateway_execute_skill({
+  name: "daily-report",
+  inputs: { date: "2024-01-15" }
+});
+```
+
+#### Skills MCP Tools
+
+| Tool | Description |
+|------|-------------|
+| `gateway_list_skills` | List all available skills with metadata |
+| `gateway_search_skills` | Search skills by name, description, or tags |
+| `gateway_get_skill` | Get full skill details including code |
+| `gateway_execute_skill` | Execute a skill with input parameters |
+| `gateway_create_skill` | Create a new reusable skill |
+
+#### Skills REST API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/api/code/skills` | GET | List all skills |
+| `/api/code/skills` | POST | Create a new skill |
+| `/api/code/skills/search?q=query` | GET | Search skills |
+| `/api/code/skills/:name` | GET | Get skill details |
+| `/api/code/skills/:name` | DELETE | Delete a skill |
+| `/api/code/skills/:name/execute` | POST | Execute a skill |
+| `/api/code/skills/templates` | GET | Get skill templates |
+| `/api/code/skills/sync` | POST | Sync external skills to workspace |
+
+#### Dashboard
+
+When enabled, a **Skills** tab appears in the dashboard (`/dashboard`) showing:
+- All available skills with search/filter
+- Skill details and code preview
+- Execute skills directly from UI
+- Create new skills from templates
+
+---
+
+### Cipher Memory (`ENABLE_CIPHER=1`)
+
+Cipher Memory provides **persistent AI memory across all IDEs**. Decisions, learnings, patterns, and insights are stored in a vector database and recalled automatically in future sessions.
+
+#### What Cipher Does
+
+- **Cross-IDE memory** - Memories persist across Claude, Cursor, Windsurf, VS Code, Codex
+- **Project-scoped context** - Filter memories by project path
+- **Semantic search** - Find relevant memories using natural language
+- **Auto-consolidation** - Session summaries stored automatically
+
+#### Prerequisites
+
+Cipher requires two external services:
+
+1. **Cipher Memory Service** - The memory API (default: `http://localhost:8082`)
+2. **Qdrant Vector Store** - For semantic memory storage
+
+#### Enabling Cipher
+
+```bash
+# In your .env file
+ENABLE_CIPHER=1
+
+# Cipher service URL (if not running on default port)
+CIPHER_API_URL=http://localhost:8082
+
+# Qdrant configuration (required for memory stats)
+QDRANT_URL=https://your-qdrant-instance.cloud
+QDRANT_API_KEY=your-qdrant-api-key
+QDRANT_COLLECTION=cipher_knowledge
+QDRANT_TIMEOUT_MS=8000
+```
+
+#### Using Cipher via MCP
+
+The Cipher service exposes the `cipher_ask_cipher` tool via MCP:
+
+```javascript
+// Store a decision
+cipher_ask_cipher({
+  message: "STORE DECISION: Using PostgreSQL for the user service. Reasoning: Better JSON support.",
+  projectPath: "/path/to/your/project"
+});
+
+// Recall context
+cipher_ask_cipher({
+  message: "Recall context for this project. What do you remember?",
+  projectPath: "/path/to/your/project"
+});
+
+// Search memories
+cipher_ask_cipher({
+  message: "Search memory for: database decisions",
+  projectPath: "/path/to/your/project"
+});
+```
+
+#### Memory Types
+
+| Prefix | Use Case | Example |
+|--------|----------|---------|
+| `STORE DECISION:` | Architectural choices | "STORE DECISION: Using Redis for caching" |
+| `STORE LEARNING:` | Bug fixes, discoveries | "STORE LEARNING: Fixed race condition in auth" |
+| `STORE MILESTONE:` | Completed features | "STORE MILESTONE: Completed user auth system" |
+| `STORE PATTERN:` | Code patterns | "STORE PATTERN: Repository pattern for data access" |
+| `STORE BLOCKER:` | Ongoing issues | "STORE BLOCKER: CI failing on ARM builds" |
+
+#### Dashboard API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/dashboard/api/cipher/sessions` | GET | List memory sessions |
+| `/dashboard/api/cipher/sessions/:id/history` | GET | Get session history |
+| `/dashboard/api/cipher/ask` | POST | Send message to Cipher |
+| `/dashboard/api/cipher/search?q=query` | GET | Search memories |
+| `/dashboard/api/cipher/qdrant-stats` | GET | Get vector store statistics |
+| `/dashboard/api/cipher/memory/:id` | GET | Get specific memory by ID |
+
+#### Dashboard
+
+When enabled, a **Memory** tab appears showing:
+- Total memories stored in Qdrant
+- Recent memories with timestamps
+- Memory categories breakdown (decisions, learnings, etc.)
+- Search interface for finding memories
+- Session history viewer
+
+---
+
+### Claude Usage Tracking (`ENABLE_CLAUDE_USAGE=1`)
+
+Track your Claude API token consumption and costs across all Claude Code sessions.
+
+#### What It Does
+
+- **Aggregate usage data** from Claude Code JSONL logs
+- **Track costs** by model (Opus, Sonnet, Haiku)
+- **Monitor cache efficiency** (creation vs read tokens)
+- **View daily/weekly/monthly trends**
+- **Live session monitoring**
+
+#### Prerequisites
+
+This feature uses the `ccusage` CLI tool to parse Claude Code conversation logs from `~/.claude/projects/`.
+
+```bash
+# The tool is auto-installed via npx when needed
+npx ccusage@latest --json
+```
+
+#### Enabling Claude Usage
+
+```bash
+# In your .env file
+ENABLE_CLAUDE_USAGE=1
+```
+
+No additional configuration required - the service automatically finds Claude Code logs.
+
+#### Dashboard API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/dashboard/api/claude-usage` | GET | Get usage summary (cached 5 min) |
+| `/dashboard/api/claude-usage/range?since=YYYY-MM-DD&until=YYYY-MM-DD` | GET | Get usage for date range |
+| `/dashboard/api/claude-usage/current` | GET | Get live session usage |
+| `/dashboard/api/claude-usage/refresh` | POST | Force refresh cached data |
+
+#### Response Format
+
+```json
+{
+  "totalCost": 45.67,
+  "totalInputTokens": 15000000,
+  "totalOutputTokens": 2500000,
+  "totalCacheCreationTokens": 500000,
+  "totalCacheReadTokens": 12000000,
+  "cacheHitRatio": 96.0,
+  "daysActive": 30,
+  "avgCostPerDay": 1.52,
+  "modelDistribution": [
+    { "model": "Claude Sonnet", "cost": 40.00, "percentage": 87.5 },
+    { "model": "Claude Opus", "cost": 5.67, "percentage": 12.5 }
+  ],
+  "topDays": [...],
+  "daily": [...]
+}
+```
+
+#### Dashboard
+
+When enabled, a **Usage** tab appears showing:
+- Total cost and token breakdown
+- Cost by model pie chart
+- Cache hit ratio (higher = more efficient)
+- Daily usage trend graph
+- Top usage days
+- Live current session monitoring
+
+---
+
+### Antigravity Usage Tracking (`ENABLE_ANTIGRAVITY=1`)
+
+Track quota and usage for Antigravity IDE (formerly Windsurf/Codeium) accounts.
+
+#### What It Does
+
+- **Real-time quota monitoring** for all model tiers
+- **Multi-account support** (Antigravity + Techgravity accounts)
+- **Conversation statistics** from local data
+- **Brain/task tracking** for agentic workflows
+- **Auto-detection** of running Language Server processes
+
+#### How It Works
+
+The service:
+1. Detects running `language_server_macos` processes
+2. Extracts CSRF tokens and ports from process arguments
+3. Queries the local gRPC-Web endpoint for quota data
+4. Falls back to file-based stats if API unavailable
+
+#### Prerequisites
+
+- Antigravity IDE installed and running
+- Account directories exist in `~/.gemini/antigravity/` or `~/.gemini/techgravity/`
+
+#### Enabling Antigravity Usage
+
+```bash
+# In your .env file
+ENABLE_ANTIGRAVITY=1
+```
+
+No additional configuration required.
+
+#### Dashboard API
+
+| Endpoint | Method | Description |
+|----------|--------|-------------|
+| `/dashboard/api/antigravity/available` | GET | Check if Antigravity accounts exist |
+| `/dashboard/api/antigravity/summary` | GET | Get full usage summary |
+| `/dashboard/api/antigravity/refresh` | POST | Force refresh cached data |
+
+#### Response Format
+
+```json
+{
+  "status": {
+    "isRunning": true,
+    "processId": 12345,
+    "port": 64446,
+    "accounts": [
+      {
+        "accountId": "antigravity",
+        "accountName": "Antigravity",
+        "accountEmail": "user@example.com",
+        "planName": "Pro",
+        "monthlyPromptCredits": 500,
+        "availablePromptCredits": 450,
+        "models": [
+          {
+            "modelId": "gemini-3-pro-high",
+            "label": "Gemini 3 Pro (High)",
+            "remainingPercentage": 85,
+            "isExhausted": false,
+            "timeUntilReset": "4h 30m"
+          },
+          {
+            "modelId": "claude-sonnet-4.5",
+            "label": "Claude Sonnet 4.5",
+            "remainingPercentage": 60,
+            "isExhausted": false
+          }
+        ]
+      }
+    ]
+  },
+  "conversationStats": {
+    "primary": {
+      "totalConversations": 150,
+      "totalSizeBytes": 25000000,
+      "formattedSize": "23.8 MB",
+      "recentConversations": 25
+    }
+  },
+  "brainStats": {
+    "primary": {
+      "totalTasks": 12,
+      "totalSizeBytes": 5000000
+    }
+  }
+}
+```
+
+#### Dashboard
+
+When enabled, an **Antigravity** tab appears showing:
+- Running status indicator (green = active)
+- Per-account quota bars for each model
+- Remaining percentage with color coding (green/yellow/red)
+- Time until quota reset
+- Conversation and task statistics
+- Multi-account support (Antigravity + Techgravity)
+
+---
+
+### Enabling All Features
+
+For personal/development use, enable everything:
+
+```bash
+# .env file
+
+# Core settings
+PORT=3010
+LOG_LEVEL=info
+
+# Enable all optional features
+ENABLE_SKILLS=1
+ENABLE_CIPHER=1
+ENABLE_ANTIGRAVITY=1
+ENABLE_CLAUDE_USAGE=1
+
+# Show all gateway tools (not just lite mode subset)
+GATEWAY_LITE_MODE=0
+
+# Cipher/Qdrant settings (if using Cipher)
+CIPHER_API_URL=http://localhost:8082
+QDRANT_URL=https://your-qdrant.cloud
+QDRANT_API_KEY=your-api-key
+QDRANT_COLLECTION=cipher_knowledge
+```
+
+Then restart the gateway:
+
+```bash
+npm run build && npm start
+```
+
+All four tabs will now appear in the dashboard at `http://localhost:3010/dashboard`.
+
+---
+
 ## Health Check
 
 ```bash
