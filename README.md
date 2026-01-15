@@ -1,6 +1,6 @@
 # MCP Gateway
 
-A universal Model Context Protocol (MCP) Gateway that aggregates multiple MCP servers and exposes them through a single endpoint. Works with all major MCP clients:
+A universal Model Context Protocol (MCP) Gateway that aggregates multiple MCP servers and provides **result optimization** that native tool search doesn't offer. Works with all major MCP clients:
 
 - ✅ **Claude Desktop / Claude Code**
 - ✅ **Cursor**
@@ -9,31 +9,59 @@ A universal Model Context Protocol (MCP) Gateway that aggregates multiple MCP se
 
 ![MCP Gateway Architecture](screenshots/MCPGateway.jpg)
 
+## How MCP Gateway Complements Anthropic's Tool Search
+
+> **January 2025**: Anthropic released [Tool Search Tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool) - a native server-side feature for discovering tools from large catalogs using `defer_loading` and regex/BM25 search.
+
+**MCP Gateway and Anthropic's Tool Search solve different problems:**
+
+| Problem | Anthropic Tool Search | MCP Gateway |
+|---------|----------------------|-------------|
+| **Tool Discovery** (finding the right tool from 100s) | ✅ Native `defer_loading` + search | ✅ Progressive disclosure |
+| **Result Filtering** (trimming large results) | ❌ Not available | ✅ `maxRows`, `fields`, `format` |
+| **Auto-Summarization** (extracting insights) | ❌ Not available | ✅ 60-90% token savings |
+| **Delta Responses** (only send changes) | ❌ Not available | ✅ 90%+ savings for polling |
+| **Aggregations** (count, sum, groupBy) | ❌ Not available | ✅ Server-side analytics |
+| **Code Batching** (multiple ops in one call) | ❌ Not available | ✅ 60-80% fewer round-trips |
+| **Skills** (reusable code patterns) | ❌ Not available | ✅ 95%+ token savings |
+
+**Bottom line:** Anthropic's Tool Search helps you *find* the right tool. MCP Gateway helps you *use* tools efficiently by managing large results, batching operations, and providing reusable patterns.
+
+You can use both together - let Anthropic handle tool discovery while routing tool *calls* through MCP Gateway for result optimization.
+
+---
+
 ## Why MCP Gateway?
 
-**Problem:** AI agents connecting to multiple MCP servers face two critical issues:
+**Problem:** AI agents face three critical challenges when working with MCP servers:
+
 1. **Tool Overload** - Loading 300+ tool definitions consumes 77,000+ context tokens before any work begins
 2. **Result Bloat** - Large query results (10K rows) can consume 50,000+ tokens per call
+3. **Repetitive Operations** - Same workflows require re-explaining to the model every time
+
+> **Note:** Anthropic's [Tool Search Tool](https://platform.claude.com/docs/en/agents-and-tools/tool-use/tool-search-tool) now addresses #1 natively for direct API users. MCP Gateway remains essential for #2 and #3, and provides tool discovery for MCP clients that don't have native tool search.
 
 **Solution:** MCP Gateway aggregates all your MCP servers and provides **15 layers of token optimization**:
 
-| Layer | What It Does | Token Savings |
-|-------|--------------|---------------|
-| Progressive Disclosure | Load tool schemas on-demand | 85% |
-| Smart Filtering | Auto-limit result sizes | 60-80% |
-| Aggregations | Server-side analytics | 90%+ |
-| Code Batching | Multiple ops in one call | 60-80% |
-| **Skills** | Zero-shot task execution | **95%+** |
-| Caching | Skip repeated queries | 100% |
-| PII Tokenization | Redact sensitive data | Security |
-| Response Optimization | Strip null/empty values | 20-40% |
-| Session Context | Avoid resending data in context | Very High |
-| Schema Deduplication | Reference identical schemas by hash | Up to 90% |
-| Micro-Schema Mode | Ultra-compact type abbreviations | 60-70% |
-| Delta Responses | Send only changes for repeated queries | 90%+ |
-| **Context Tracking** | Monitor context usage, prevent overflow | **Safety** |
-| **Auto-Summarization** | Extract insights from large results | **60-90%** |
-| **Query Planning** | Detect optimization opportunities | **30-50%** |
+| Layer | What It Does | Token Savings | Unique to Gateway? |
+|-------|--------------|---------------|:------------------:|
+| Progressive Disclosure | Load tool schemas on-demand | 85% | Shared* |
+| **Smart Filtering** | Auto-limit result sizes | 60-80% | ✅ |
+| **Aggregations** | Server-side analytics | 90%+ | ✅ |
+| **Code Batching** | Multiple ops in one call | 60-80% | ✅ |
+| **Skills** | Zero-shot task execution | **95%+** | ✅ |
+| Caching | Skip repeated queries | 100% | ✅ |
+| PII Tokenization | Redact sensitive data | Security | ✅ |
+| Response Optimization | Strip null/empty values | 20-40% | ✅ |
+| Session Context | Avoid resending data in context | Very High | ✅ |
+| Schema Deduplication | Reference identical schemas by hash | Up to 90% | ✅ |
+| Micro-Schema Mode | Ultra-compact type abbreviations | 60-70% | ✅ |
+| **Delta Responses** | Send only changes for repeated queries | 90%+ | ✅ |
+| **Context Tracking** | Monitor context usage, prevent overflow | **Safety** | ✅ |
+| **Auto-Summarization** | Extract insights from large results | **60-90%** | ✅ |
+| **Query Planning** | Detect optimization opportunities | **30-50%** | ✅ |
+
+*\*Anthropic's Tool Search provides native tool discovery; MCP Gateway provides it for MCP clients without native support.*
 
 **Result:** A typical session drops from ~500,000 tokens to ~25,000 tokens (95% reduction).
 
