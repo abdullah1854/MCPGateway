@@ -1,5 +1,5 @@
-# Claude project context (local only)
-.claude-project.md
+# Backup directories
+.backup-before-dotagents/
 
 # Dependencies
 node_modules/
@@ -38,8 +38,6 @@ logs/
 *.swo
 *.code-workspace
 .DS_Store
-.cursorrules
-.windsurfrules
 
 # Test coverage
 coverage/
