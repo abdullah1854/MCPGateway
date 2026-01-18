@@ -386,6 +386,65 @@ Or add to your VS Code `settings.json`:
 }
 ```
 
+## Cross-IDE Configuration (`.agents/`)
+
+MCP Gateway uses a centralized `.agents/` directory as the single source of truth for AI agent configuration across all IDEs:
+
+```
+.agents/
+├── AGENTS.md              # Unified project rules (symlinked to all IDEs)
+├── hooks/
+│   └── skill-activation.mjs  # Auto-activates skills based on prompt keywords
+├── skills/                # 21 Claude Code skills (SKILL.md format)
+│   ├── code-review/
+│   ├── debugging/
+│   ├── git-workflow/
+│   └── ...
+└── rules/                 # Additional rule fragments
+    └── cipher-memory.md
+```
+
+### How It Works
+
+The `.agents/AGENTS.md` file is symlinked to each IDE's configuration location:
+
+| IDE | Symlink |
+|-----|---------|
+| **Cursor** | `.cursorrules → .agents/AGENTS.md` |
+| **Windsurf** | `.windsurfrules → .agents/AGENTS.md` |
+| **Claude Code** | `CLAUDE.md → .agents/AGENTS.md` |
+| **Codex** | `AGENTS.md → .agents/AGENTS.md` |
+
+This means:
+- **One file to maintain** - Edit `.agents/AGENTS.md` and all IDEs get the update
+- **Consistent behavior** - Same rules, skills, and protocols across all tools
+- **Version controlled** - Track all configuration in git
+
+### Skills Auto-Activation
+
+The `.agents/AGENTS.md` includes trigger keywords that automatically activate relevant skills:
+
+| Trigger | Skill Activated |
+|---------|-----------------|
+| "review code", "security audit" | `code-review` |
+| "debug", "fix bug", "not working" | `debugging` |
+| "commit", "push", "create PR" | `git-workflow` |
+| "build UI", "dashboard", "React" | `frontend-build` |
+| "deploy", "docker", "production" | `infra-deploy` |
+
+**Claude Code**: Skills auto-load via the `skill-activation.mjs` hook.
+**Other IDEs**: Follow the instructions in AGENTS.md to manually load skills.
+
+### Setting Up for Your Fork
+
+If you fork this repository:
+
+1. The symlinks are already configured in the repo
+2. Edit `.agents/AGENTS.md` to customize rules for your project
+3. Add/modify skills in `.agents/skills/`
+
+---
+
 ## Backend Server Configuration
 
 The gateway can connect to MCP servers using different transports:
