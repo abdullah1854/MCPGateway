@@ -76,10 +76,8 @@ const ACCOUNT_DIRS = [
   { id: 'techgravity', name: 'Techgravity', dir: path.join(os.homedir(), '.gemini', 'techgravity'), appDataDir: 'techgravity' },
 ];
 
-// Map email to display name (Antigravity = Abdullah, Techgravity = Sana)
+// Map email to display name
 const EMAIL_TO_ACCOUNT: { [email: string]: { id: string; displayName: string } } = {
-  'abdullah0094@gmail.com': { id: 'antigravity', displayName: 'Antigravity' },
-  'sanaaftab036@gmail.com': { id: 'techgravity', displayName: 'Techgravity' },
 };
 
 // Cache for quota data
