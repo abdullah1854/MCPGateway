@@ -6,17 +6,32 @@
 
 ---
 
-## FIRST: Check Skill Triggers (MANDATORY)
+## FIRST: Check Skill Triggers (LAZY LOADING)
 
-**BEFORE responding to ANY user request**, scan the **Skill Auto-Activation** section below and check if the user's message matches any skill triggers.
+**Skill Loading Strategy** (Token-Optimized):
+- For **SIMPLE** tasks: Use your built-in knowledge, don't load skills
+- For **COMPLEX** tasks: Load the appropriate skill file only when needed
 
-**If a match is found:**
+**Simple Tasks** (Don't load skills):
+- Single-line fixes, typos, obvious bugs
+- Basic questions about concepts
+- Simple git commands (status, log)
+- File reads, basic edits
+
+**Complex Tasks** (Load skill first):
+- Multi-file refactoring
+- Architecture design decisions
+- Security reviews or audits
+- Advanced git workflows (interactive rebase, conflict resolution)
+- Production deployments
+- Database schema migrations
+- Performance optimization
+
+**If loading a skill:**
 1. Read the skill: `.agents/skills/{skill-name}/SKILL.md`
 2. Follow the skill's instructions in your response
 
 **This applies to ALL IDEs** - Claude Code, Cursor, Windsurf, VS Code, Codex, etc.
-
-Skip this check only for simple greetings or meta-questions about the AI itself.
 
 ---
 
@@ -111,14 +126,135 @@ When the user's message contains any trigger keyword below, **immediately read**
 | Skill | Triggers | Description |
 |-------|----------|-------------|
 | `webapp-testing` | "playwright", "e2e test", "end-to-end", "browser automation", "ui test", "test webapp" | Playwright browser automation |
+| `test-driven-fix` | "write a test first", "test-driven fix", "TDD fix", "reproduce with test", "make it pass", "fix with test" | Test-first debugging: reproduce bug with failing test, then iterate until passing |
 
-### Development Tools
+### Development Tools & Automation
 
 | Skill | Triggers | Description |
 |-------|----------|-------------|
 | `mcp-builder` | "mcp server", "mcp tool", "build mcp", "model context protocol", "extend claude", "add tools to claude" | Build MCP servers |
 | `skill-creator` | "create skill", "new skill", "build skill", "skill template", "SKILL.md" | Create new Claude Code skills |
 | `api-integration` | "integrate api", "api call", "webhook", "REST", "GraphQL", "stripe", "fetch from" | External API integration |
+
+### LISA - Autonomous Iteration Engine
+
+**CRITICAL**: When user mentions LISA, **ALWAYS** use the LISA script directly. Do NOT load a skill file.
+
+| Trigger Keywords | Action | Description |
+|------------------|--------|-------------|
+| "LISA", "run LISA", "use LISA", "invoke LISA", "start LISA", "lisa", "fix with lisa", "iterate", "auto-fix", "retry until fixed" | **Execute**: `npm run lisa -- "<task>" --verify "<cmd>" --max <N>` | Autonomous iteration engine with Empirica + Cipher integration |
+
+**When to Use LISA:**
+- User explicitly says "LISA", "use LISA", "run LISA"
+- User wants automated retry/iteration until tests pass
+- User wants to fix something iteratively with verification
+
+**LISA Invocation Template:**
+```bash
+npm run lisa -- "Fix [problem]" --verify "[test command]" --max [iterations]
+```
+
+**Examples:**
+- User: "Use LISA to fix the tests" → `npm run lisa -- "Fix failing tests" --verify "npm test" --max 5`
+- User: "Run LISA on the build errors" → `npm run lisa -- "Fix build errors" --verify "npm run build" --max 5`
+- User: "LISA iterate until it works" → `npm run lisa -- "Fix the bug" --verify "npm test" --max 10`
+
+**Important:**
+- LISA is a **script**, not a skill - execute it via npm, don't read a skill file
+- Always include `--verify` for automated checking
+- Default `--max` is 5, increase if needed
+- LISA integrates with Empirica (epistemic tracking) and Cipher (memory) automatically
+
+### AI Delegation Workflow (MANDATORY)
+
+**CRITICAL**: Delegate tasks to secondary AI agents on EVERY prompt to maximize efficiency.
+
+#### Delegation Rules
+
+| Task Type | Delegate To | Why |
+|-----------|-------------|-----|
+| **Planning** | Gemini 3 Pro | Large context, strong reasoning |
+| **Architecture design** | Gemini 3 Pro | Complex multi-step planning |
+| **Small tasks** | Kimi K2.5 | Fast, efficient for focused work |
+| **Code generation** | Kimi K2.5 | Coding-optimized model |
+| **Research** | Kimi K2.5 | Quick lookups and analysis |
+| **Validation** | Either | Second opinion on approach |
+
+#### Gemini CLI (Planning & Complex Tasks)
+
+```bash
+gemini -p "your planning task" --yolo
+gemini -p "design the architecture for..." --yolo
+gemini -w /path/to/project -p "plan implementation of..." --yolo
+```
+
+**Use Gemini for:**
+- Implementation planning
+- Architecture decisions
+- Multi-step task breakdown
+- Complex analysis requiring large context
+- Design reviews
+
+#### Kimi K2.5 (Small Tasks & Execution)
+
+```bash
+kimi -p "your small task" --yolo
+kimi -w /path/to/project -p "implement this function..." --yolo
+```
+
+**Use Kimi for:**
+- Code generation
+- Quick research
+- File analysis
+- Small implementations
+- Focused single-file tasks
+
+#### Workflow Example
+
+```
+User: "Build a rate limiting middleware"
+
+1. DELEGATE TO GEMINI (planning):
+   gemini -p "Plan the implementation of rate limiting middleware for Express.js. Consider: storage options, algorithms, configuration, testing approach" --yolo
+
+2. DELEGATE TO KIMI (execution):
+   kimi -p "Implement the rate limiter based on this plan: [plan from gemini]" --yolo
+
+3. REVIEW & INTEGRATE the outputs
+```
+
+#### Parallel Delegation
+
+Run both in parallel when tasks are independent:
+```bash
+gemini -p "Plan the database schema" --yolo &
+kimi -p "Research existing rate limiting libraries" --yolo &
+wait
+```
+
+#### Shared MCP Gateway
+
+Both agents have access to MCP Gateway (localhost:3010) with 300+ tools:
+- Database queries (Maximo, AX, Fabric)
+- File operations
+- Web search
+- Memory (Cipher)
+- And more...
+
+**Configs:**
+- Gemini: `~/.gemini/settings.json`
+- Kimi: `~/.kimi/config.toml` + `~/.kimi/mcp.json`
+
+#### Security: NEVER Share Credentials
+
+**CRITICAL**: Only Abdullah's primary AI (Claude) is trusted with credentials.
+
+- **NEVER** expose passwords, API keys, or secrets to Kimi or Gemini
+- **NEVER** let them read files containing credentials
+- When delegating tasks involving sensitive files, **sanitize first** or describe abstractly
+- If a file contains secrets, redact them before asking for review
+
+---
 
 ### Documentation
 
@@ -131,6 +267,7 @@ When the user's message contains any trigger keyword below, **immediately read**
 | Skill | Triggers | Description |
 |-------|----------|-------------|
 | `infra-deploy` | "deploy", "VPS", "docker", "coolify", "SSH", "nginx", "production", "server setup", "hosting" | Infrastructure and deployment |
+| `hostinger-deploy` | "deploy to hostinger", "hostinger", "redeploy", "publish website", "hPanel", "OPcache", "site not updating" | Hostinger-specific deployment with OPcache/CDN handling |
 
 ### Session Management
 
@@ -177,6 +314,7 @@ Active when `gateway_*` tools are available.
 ### Critical Rules
 
 - **Progressive Disclosure**: Never request `full_schema` for all tools. Load only what you use.
+- **Skills Listing**: ALWAYS use `gateway_list_skills` with `detail="minimal"` (saves ~95% tokens). Only use `detail="full"` if you need the complete code.
 - **Aggregation**: Use `gateway_call_tool_aggregate` for counts/sums.
 - **Filtering**: Always set `maxRows` in `gateway_call_tool_filtered`.
 
@@ -184,8 +322,9 @@ Active when `gateway_*` tools are available.
 
 **STOP & READ**: If the user asks about **Databases (Maximo, AX, CRM)**, **Hosting**, or **infrastructure**:
 1. You DO NOT have the schema mapping in context to save tokens.
-2. **READ THIS FILE FIRST**: `/Users/abdullah/MCP Gateway/docs/KEY_MCP_REFERENCE.md`
-   - It contains: Server Mappings, Anti-Hallucination rules, and Examples.
+2. **READ THIS FILE FIRST**: `/Users/abdullah/MCP Gateway/docs/MCP_REFERENCE.md`
+   - It contains: Server Mappings, Anti-Hallucination rules, Tool prefix mapping, Troubleshooting, and Examples.
+   - **Token Cost**: ~4,000 tokens (only load when needed)
 
 ---
 
@@ -367,3 +506,6 @@ HTTP Response
 - Always ask before deploying
 - Use MCP Gateway efficient patterns when working with gateway tools
 - Dashboard: http://localhost:3010/dashboard
+- **DELEGATE ON EVERY PROMPT**:
+  - Planning/Architecture → `gemini -p "..." --yolo`
+  - Small tasks/Code → `kimi -p "..." --yolo`
