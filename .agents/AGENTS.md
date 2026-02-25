@@ -2,7 +2,7 @@
 
 > Single source of truth for all IDE configurations (Claude Code, Cursor, Windsurf, Codex)
 
-**Project Path**: `/Users/abdullah/MCP Gateway`
+**Project Path**: (set to your local clone path)
 
 ---
 
@@ -60,7 +60,7 @@ cipher_ask_cipher({
 
 ### projectPath Rules
 
-1. **ALWAYS** use full absolute path: `/Users/abdullah/MCP Gateway`
+1. **ALWAYS** use full absolute path: `/path/to/mcp-gateway`
 2. **NEVER** use placeholders like `{cwd}` - they don't resolve!
 3. **NEVER** use just the project name
 
@@ -91,12 +91,13 @@ When the user's message contains any trigger keyword below, **immediately read**
 |-------|----------|-------------|
 | `deep-thinking` | "think harder", "ultrathink", "analyze thoroughly", "complex problem", "architecture decision", "trade-off", "design system" | Extended reasoning for complex problems |
 
-### Code Quality
+### Code Quality & Debugging
 
 | Skill | Triggers | Description |
 |-------|----------|-------------|
 | `code-review` | "review code", "review PR", "security audit", "find bugs", "code quality", "check for vulnerabilities" | Security, performance, maintainability review |
-| `debugging` | "debug", "fix bug", "not working", "undefined", "null", "crash", "fails", "broken", "error message", "stack trace" | Systematic debugging protocol |
+| `debugging` | "debug", "fix bug", "not working", "undefined", "null", "crash", "fails", "broken", "error message", "stack trace" | Hardened debugging protocol with STOP-THINK-ACT, evidence-first methodology, anti-exploration-spiral rules, and parallel agent investigation patterns. Encoded from 169 sessions of real friction data |
+| `test-driven-fix` | "write a test first", "test-driven fix", "TDD fix", "reproduce with test", "make it pass", "fix with test" | Test-first debugging: reproduce bug with failing test, then iterate until passing |
 
 ### Git & Version Control
 
@@ -104,37 +105,31 @@ When the user's message contains any trigger keyword below, **immediately read**
 |-------|----------|-------------|
 | `git-workflow` | "commit", "push", "merge", "rebase", "create PR", "pull request", "branch", "resolve conflict" | Git operations and conventional commits |
 
-### Documents
+### SEO & Deployment
 
 | Skill | Triggers | Description |
 |-------|----------|-------------|
-| `docx` | "word document", ".docx", "create document", "edit document", "tracked changes", "redline" | Word document creation and editing |
-| `pdf` | "pdf", "merge pdf", "split pdf", "extract from pdf", "create pdf", "pdf form" | PDF manipulation |
-| `pptx` | "powerpoint", ".pptx", "presentation", "slides", "deck" | PowerPoint presentations |
-| `xlsx` | "excel", "spreadsheet", ".xlsx", "financial model", "formulas", "pivot table", "workbook" | Excel spreadsheet operations |
+| `seo-recovery` | "SEO", "traffic drop", "indexing", "canonical", "hreflang", "sitemap", "search console", "GSC", "crawl errors", "deindexed", "organic traffic" | SEO diagnostic protocol with GSC MCP integration, common issue playbooks, and Hostinger deployment awareness |
+| `hostinger-deploy` | "deploy to hostinger", "hostinger", "redeploy", "publish website", "hPanel", "OPcache", "site not updating" | Hostinger-specific deployment with OPcache/CDN handling |
 
 ### Frontend & UI
 
 | Skill | Triggers | Description |
 |-------|----------|-------------|
 | `frontend-build` | "build UI", "build component", "landing page", "dashboard", "frontend", "tailwind", "responsive", "design", "react", "next.js", "shadcn" | Production-grade frontend with distinctive design |
-| `web-artifacts` | "web artifact", "single-file app", "bundle html", "standalone app", "interactive demo", "portable app" | Self-contained HTML applications |
-| `algorithmic-art` | "generative art", "algorithmic art", "p5.js", "creative coding", "procedural generation" | Generative art with p5.js |
 
-### Testing
+### Infrastructure & Session
 
 | Skill | Triggers | Description |
 |-------|----------|-------------|
-| `webapp-testing` | "playwright", "e2e test", "end-to-end", "browser automation", "ui test", "test webapp" | Playwright browser automation |
-| `test-driven-fix` | "write a test first", "test-driven fix", "TDD fix", "reproduce with test", "make it pass", "fix with test" | Test-first debugging: reproduce bug with failing test, then iterate until passing |
+| `infra-deploy` | "deploy", "VPS", "docker", "coolify", "SSH", "nginx", "production", "server setup", "hosting" | Infrastructure and deployment |
+| `session-handoff` | "save session", "handoff", "continue later", "switching IDE", "end session", "summarize session" | Context preservation across sessions |
 
-### Development Tools & Automation
+### Documentation
 
 | Skill | Triggers | Description |
 |-------|----------|-------------|
-| `mcp-builder` | "mcp server", "mcp tool", "build mcp", "model context protocol", "extend claude", "add tools to claude" | Build MCP servers |
-| `skill-creator` | "create skill", "new skill", "build skill", "skill template", "SKILL.md" | Create new Claude Code skills |
-| `api-integration` | "integrate api", "api call", "webhook", "REST", "GraphQL", "stripe", "fetch from" | External API integration |
+| `doc-coauthoring` | "write document", "draft proposal", "draft spec", "co-author", "help me write", "RFC", "ADR", "design doc", "technical spec" | Collaborative document writing |
 
 ### LISA - Autonomous Iteration Engine
 
@@ -167,121 +162,57 @@ npm run lisa -- "Fix [problem]" --verify "[test command]" --max [iterations]
 
 ### AI Delegation Workflow (MANDATORY)
 
-**CRITICAL**: Delegate tasks to secondary AI agents on EVERY prompt to maximize efficiency.
+**CRITICAL**: Use a team-of-agents pass for direction, then apply one orchestrator-owned minimal-risk patch.
 
-#### Delegation Rules
+#### Orchestrator Rule
 
-| Task Type | Delegate To | Why |
-|-----------|-------------|-----|
-| **Planning** | Gemini 3 Pro | Large context, strong reasoning |
-| **Architecture design** | Gemini 3 Pro | Complex multi-step planning |
-| **Small tasks** | Kimi K2.5 | Fast, efficient for focused work |
-| **Code generation** | Kimi K2.5 | Coding-optimized model |
-| **Research** | Kimi K2.5 | Quick lookups and analysis |
-| **Validation** | Either | Second opinion on approach |
+- Claude is the orchestrator and owns architecture, coding, and final edits.
+- Specialist agents provide support outputs only (research/analysis/summarization/translation/file ops).
 
-#### Gemini CLI (Planning & Complex Tasks)
+#### Routing Rules
 
-```bash
-gemini -p "your planning task" --yolo
-gemini -p "design the architecture for..." --yolo
-gemini -w /path/to/project -p "plan implementation of..." --yolo
-```
+| Task Type | Primary | Fallback | Why |
+|-----------|---------|----------|-----|
+| **Research** | Kimi | Z.AI | Fast exploration, multilingual |
+| **Analysis** | Z.AI | Kimi | Reasoning cross-check |
+| **Creative** | Kimi | Z.AI | Ideation quality |
+| **Translation** | Kimi | Z.AI | Multilingual quality |
+| **Summarization** | Minimax | Kimi | Long context + cost |
+| **Long-context** | Minimax | Kimi | 1M-context processing |
+| **Fast/Cheap** | Minimax | Z.AI | Latency and cost control |
+| **File editing** | Codex CLI | Kimi | Local workspace operations |
+| **General** | Kimi | Minimax | Balanced default |
 
-**Use Gemini for:**
-- Implementation planning
-- Architecture decisions
-- Multi-step task breakdown
-- Complex analysis requiring large context
-- Design reviews
+#### Correct CLI Usage
 
-#### Kimi K2.5 (Small Tasks & Execution)
+Gemini does **not** support `-w`; use `--include-directories`:
 
 ```bash
-kimi -p "your small task" --yolo
-kimi -w /path/to/project -p "implement this function..." --yolo
+gemini --include-directories "/path/to/mcp-gateway" -p "Plan implementation for <task>" --yolo
 ```
 
-**Use Kimi for:**
-- Code generation
-- Quick research
-- File analysis
-- Small implementations
-- Focused single-file tasks
+Kimi workspace form (requires valid CLI login/auth):
 
-#### Workflow Example
-
-```
-User: "Build a rate limiting middleware"
-
-1. DELEGATE TO GEMINI (planning):
-   gemini -p "Plan the implementation of rate limiting middleware for Express.js. Consider: storage options, algorithms, configuration, testing approach" --yolo
-
-2. DELEGATE TO KIMI (execution):
-   kimi -p "Implement the rate limiter based on this plan: [plan from gemini]" --yolo
-
-3. REVIEW & INTEGRATE the outputs
-```
-
-#### Parallel Delegation
-
-Run both in parallel when tasks are independent:
 ```bash
-gemini -p "Plan the database schema" --yolo &
-kimi -p "Research existing rate limiting libraries" --yolo &
-wait
+kimi -w "/path/to/mcp-gateway" -p "Research/analyze <task>" --yolo
 ```
 
-#### Shared MCP Gateway
+#### Workflow Pattern
 
-Both agents have access to MCP Gateway (localhost:3010) with 300+ tools:
-- Database queries (Maximo, AX, Fabric)
-- File operations
-- Web search
-- Memory (Cipher)
-- And more...
-
-**Configs:**
-- Gemini: `~/.gemini/settings.json`
-- Kimi: `~/.kimi/config.toml` + `~/.kimi/mcp.json`
+1. Delegate to one or two specialists for direction.
+2. Compare outputs and resolve conflicts.
+3. Apply one final patch in the main codebase.
+4. Validate with tests/build.
 
 #### Security: NEVER Share Credentials
 
-**CRITICAL**: Only Abdullah's primary AI (Claude) is trusted with credentials.
+**CRITICAL**: Only Abdullah's primary orchestrator is trusted with credentials.
 
-- **NEVER** expose passwords, API keys, or secrets to Kimi or Gemini
-- **NEVER** let them read files containing credentials
-- When delegating tasks involving sensitive files, **sanitize first** or describe abstractly
-- If a file contains secrets, redact them before asking for review
+- **NEVER** expose passwords, API keys, or secrets to delegated agents
+- **NEVER** delegate raw secret-bearing files
+- Sanitize/redact sensitive data before delegation
 
 ---
-
-### Documentation
-
-| Skill | Triggers | Description |
-|-------|----------|-------------|
-| `doc-coauthoring` | "write document", "draft proposal", "draft spec", "co-author", "help me write", "RFC", "ADR", "design doc", "technical spec" | Collaborative document writing |
-
-### Infrastructure
-
-| Skill | Triggers | Description |
-|-------|----------|-------------|
-| `infra-deploy` | "deploy", "VPS", "docker", "coolify", "SSH", "nginx", "production", "server setup", "hosting" | Infrastructure and deployment |
-| `hostinger-deploy` | "deploy to hostinger", "hostinger", "redeploy", "publish website", "hPanel", "OPcache", "site not updating" | Hostinger-specific deployment with OPcache/CDN handling |
-
-### Session Management
-
-| Skill | Triggers | Description |
-|-------|----------|-------------|
-| `session-handoff` | "save session", "handoff", "continue later", "switching IDE", "end session", "summarize session", "wrapping up" | Context preservation across sessions |
-
-### Domain-Specific: ERP
-
-| Skill | Triggers | Description |
-|-------|----------|-------------|
-| `d365fo-debugging` | "D365", "Dynamics 365", "Dynamics AX", "AX", "voucher", "DATAAREAID", "SSRS", "batch job", "posting", "invoice missing", "DMF", "data management", "WMS", "warehouse", "wave", "work order stuck", "can't post", "security role", "slow query", "blocking", "deadlock", "sales order", "purchase order", "PO", "SO", "wrong amount" | Complete D365 F&O debugging framework |
-| `maximo-helper` | "maximo", "work order", "WONUM", "asset", "LABTRANS", "SITEID", "GBE" | Maximo database queries with site filtering |
-| `gbcr-commission` | "GBCR", "commission", "agreement", "settlement", "FTCNV", "rebate", "vendor commission" | GBCR commission debugging |
 
 ### Loading Skills
 
@@ -320,9 +251,9 @@ Active when `gateway_*` tools are available.
 
 ### Database & Complex Tasks
 
-**STOP & READ**: If the user asks about **Databases (Maximo, AX, CRM)**, **Hosting**, or **infrastructure**:
+**STOP & READ**: If the user asks about **Databases**, **Hosting**, or **infrastructure**:
 1. You DO NOT have the schema mapping in context to save tokens.
-2. **READ THIS FILE FIRST**: `/Users/abdullah/MCP Gateway/docs/MCP_REFERENCE.md`
+2. **READ THIS FILE FIRST**: `docs/MCP_REFERENCE.md` (relative to project root)
    - It contains: Server Mappings, Anti-Hallucination rules, Tool prefix mapping, Troubleshooting, and Examples.
    - **Token Cost**: ~4,000 tokens (only load when needed)
 

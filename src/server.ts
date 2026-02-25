@@ -15,6 +15,8 @@ import { createDashboardRoutes } from './dashboard/index.js';
 import { createCodeExecutionRoutes } from './code-execution/index.js';
 import { createAuthMiddleware, createRateLimitMiddleware } from './middleware/index.js';
 import { MetricsCollector, createMetricsRoutes, AuditLogger } from './monitoring/index.js';
+import { HealthTimelineService } from './services/health-timeline.js';
+import { ToolAnalyticsService } from './services/tool-analytics.js';
 import { logger } from './logger.js';
 import ConfigManager from './config.js';
 
@@ -27,6 +29,8 @@ export class MCPGatewayServer {
   private sessionCleanupInterval: NodeJS.Timeout | null = null;
   private metricsCollector: MetricsCollector;
   private auditLogger: AuditLogger;
+  private healthTimeline: HealthTimelineService;
+  private toolAnalytics: ToolAnalyticsService;
 
   constructor(config: GatewayConfig) {
     this.config = config;
@@ -39,6 +43,18 @@ export class MCPGatewayServer {
     );
     this.metricsCollector = new MetricsCollector();
     this.auditLogger = new AuditLogger();
+    this.healthTimeline = new HealthTimelineService();
+    this.toolAnalytics = new ToolAnalyticsService();
+
+    // Wire tool analytics into protocol handler
+    this.protocolHandler.setToolCallListener((metrics) => {
+      this.toolAnalytics.recordToolCall(
+        metrics.toolName,
+        metrics.backendId,
+        metrics.durationMs,
+        metrics.success,
+      );
+    });
 
     this.setupMiddleware();
     this.setupRoutes();
@@ -200,6 +216,25 @@ export class MCPGatewayServer {
     // Metrics & Monitoring (Prometheus format)
     this.app.use('/', createMetricsRoutes(this.backendManager, this.metricsCollector));
 
+    // Health timeline & analytics APIs
+    this.app.get('/dashboard/api/health-timeline', (_req: Request, res: Response) => {
+      res.json({ backends: this.healthTimeline.getAllBackendHealth() });
+    });
+    this.app.get('/dashboard/api/health-timeline/:backendId', (req: Request, res: Response) => {
+      res.json(this.healthTimeline.getBackendHealth(req.params.backendId));
+    });
+    this.app.get('/dashboard/api/analytics', (_req: Request, res: Response) => {
+      res.json(this.toolAnalytics.getSummary());
+    });
+    this.app.get('/dashboard/api/analytics/tools/:name', (req: Request, res: Response) => {
+      const stats = this.toolAnalytics.getToolStats(req.params.name);
+      if (!stats) {
+        res.status(404).json({ error: `No analytics for tool: ${req.params.name}` });
+        return;
+      }
+      res.json(stats);
+    });
+
     // MCP endpoints
     this.app.use('/mcp', createHttpTransport(this.protocolHandler));
     this.app.use('/sse', createSseTransport(this.protocolHandler));
@@ -234,14 +269,17 @@ export class MCPGatewayServer {
   private setupEventHandlers(): void {
     this.backendManager.on('backendConnected', (id: string) => {
       logger.info(`Backend connected: ${id}`);
+      this.healthTimeline.recordEvent(id, 'connected');
     });
 
     this.backendManager.on('backendDisconnected', (id: string) => {
       logger.warn(`Backend disconnected: ${id}`);
+      this.healthTimeline.recordEvent(id, 'disconnected');
     });
 
     this.backendManager.on('backendError', (id: string, error: Error) => {
       logger.error(`Backend error: ${id}`, { error: error.message });
+      this.healthTimeline.recordEvent(id, 'error', error.message);
     });
 
     this.backendManager.on('toolsUpdated', () => {
@@ -372,6 +410,27 @@ export class MCPGatewayServer {
    */
   getAuditLogger(): AuditLogger {
     return this.auditLogger;
+  }
+
+  /**
+   * Get the health timeline service
+   */
+  getHealthTimeline(): HealthTimelineService {
+    return this.healthTimeline;
+  }
+
+  /**
+   * Get the tool analytics service
+   */
+  getToolAnalytics(): ToolAnalyticsService {
+    return this.toolAnalytics;
+  }
+
+  /**
+   * Get the underlying HTTP server instance (for graceful shutdown)
+   */
+  getHttpServer(): ReturnType<Express['listen']> | null {
+    return this.server;
   }
 }
 

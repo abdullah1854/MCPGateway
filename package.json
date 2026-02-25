@@ -11,7 +11,12 @@
     "start": "node dist/index.js",
     "restart": "launchctl stop com.mcp-gateway && launchctl start com.mcp-gateway",
     "lint": "eslint src/",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "lisa": "tsx scripts/lisa.ts",
+    "cipher-test": "tsx scripts/cipher-helper.ts",
+    "cipher-recall": "tsx scripts/cipher-helper.ts recall",
+    "diagnose-cipher": "./scripts/diagnose-cipher.sh",
+    "test": "tsx src/code-execution/executor.sandbox.test.ts"
   },
   "keywords": [
     "mcp",

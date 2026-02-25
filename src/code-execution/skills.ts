@@ -598,11 +598,23 @@ export class SkillsManager {
   }
 
   /**
-   * List all available skills
+   * List all available skills with configurable detail level
+   * @param detail - 'minimal' returns only name/description/category (saves ~95% tokens), 'full' returns everything
    */
-  listSkills(): Skill[] {
+  listSkills(detail: 'minimal' | 'full' = 'full'): Skill[] | Array<Pick<Skill, 'name' | 'description' | 'category' | 'tags'>> {
     this.refreshCache();
-    return Array.from(this.skillsCache.values());
+    const allSkills = Array.from(this.skillsCache.values());
+
+    if (detail === 'minimal') {
+      return allSkills.map(skill => ({
+        name: skill.name,
+        description: skill.description,
+        category: skill.category,
+        tags: skill.tags,
+      }));
+    }
+
+    return allSkills;
   }
 
   /**
@@ -760,16 +772,8 @@ export class SkillsManager {
 
       // Pass outputs as inputs to next skill
       if (result.output && result.output.length > 0) {
-        try {
-          const lastOutput = result.output[result.output.length - 1];
-          if (typeof lastOutput === 'object') {
-            currentInputs = { ...currentInputs, previousResult: lastOutput };
-          } else {
-            currentInputs = { ...currentInputs, previousResult: lastOutput };
-          }
-        } catch {
-          // Continue with current inputs
-        }
+        const lastOutput = result.output[result.output.length - 1];
+        currentInputs = { ...currentInputs, previousResult: lastOutput };
       }
     }
 
@@ -991,6 +995,8 @@ Updated: ${skill.updatedAt}
     if (!this.externalSkillsPaths.includes(path)) {
       this.externalSkillsPaths.push(path);
       this.invalidateCache();
+      // Close existing watchers and re-create for all paths to avoid duplicates
+      this.cleanup();
       this.setupWatchers();
     }
 

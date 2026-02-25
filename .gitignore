@@ -62,3 +62,13 @@ workspace/
 # Brainstorm and analysis files
 BrainStorm/
 SKILL-REDUNDANCY-REPORT.md
+
+# Personal automation scripts (contain local paths/server details)
+scripts/
+
+# Enterprise-specific skills (contain internal infrastructure details)
+.agents/skills/enterprise-data-platform/
+.agents/skills/d365fo-debugging/
+.agents/skills/database-query-guide/
+.agents/skills/ax-dynamics-helper/
+.agents/skills/fabric-helper/

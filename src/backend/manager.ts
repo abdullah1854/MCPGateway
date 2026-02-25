@@ -16,6 +16,7 @@ import { Backend } from './base.js';
 import { StdioBackend } from './stdio.js';
 import { HttpBackend } from './http.js';
 import { SSEBackend } from './sse.js';
+import { CircuitBreakerManager, CircuitBreakerStats } from './circuit-breaker.js';
 import { logger } from '../logger.js';
 
 // Event types for BackendManager (used via EventEmitter)
@@ -35,9 +36,16 @@ export class BackendManager extends EventEmitter {
   private disabledBackends = new Set<string>();
   private reconnectTimers = new Map<string, NodeJS.Timeout>();
   private reconnectAttempts = new Map<string, number>();
+  private circuitBreakers: CircuitBreakerManager;
 
   constructor() {
     super();
+    // Initialize circuit breaker manager with configurable thresholds
+    this.circuitBreakers = new CircuitBreakerManager({
+      failureThreshold: parseInt(process.env.CIRCUIT_BREAKER_FAILURE_THRESHOLD ?? '5', 10),
+      resetTimeout: parseInt(process.env.CIRCUIT_BREAKER_RESET_TIMEOUT ?? '30000', 10),
+      halfOpenSuccessThreshold: parseInt(process.env.CIRCUIT_BREAKER_HALF_OPEN_THRESHOLD ?? '2', 10),
+    });
   }
 
   /**
@@ -84,7 +92,7 @@ export class BackendManager extends EventEmitter {
     backend.on('disconnected', () => {
       this.updateMappings();
       this.emit('backendDisconnected', config.id);
-       // Schedule reconnect for enabled backends
+      // Schedule reconnect for enabled backends
       this.scheduleReconnect(config.id, config);
     });
 
@@ -422,8 +430,23 @@ export class BackendManager extends EventEmitter {
       };
     }
 
+    // Check circuit breaker before attempting call
+    const breaker = this.circuitBreakers.getBreaker(backendId);
+    if (!breaker.canExecute()) {
+      const stats = breaker.getStats();
+      return {
+        jsonrpc: '2.0',
+        id: 0,
+        error: {
+          code: MCPErrorCodes.InternalError,
+          message: `Circuit breaker OPEN for backend ${backendId}. Last failure: ${stats.lastFailureTime ? new Date(stats.lastFailureTime).toISOString() : 'unknown'}. Retry after circuit resets.`,
+        },
+      };
+    }
+
     const backend = this.backends.get(backendId);
     if (!backend || backend.status !== 'connected') {
+      breaker.recordFailure(new Error('Backend not connected'));
       return {
         jsonrpc: '2.0',
         id: 0,
@@ -455,7 +478,21 @@ export class BackendManager extends EventEmitter {
       },
     };
 
-    return backend.sendRequest(request, timeout);
+    try {
+      const response = await backend.sendRequest(request, timeout);
+
+      // Check if response is an error
+      if (response.error) {
+        breaker.recordFailure(new Error(response.error.message));
+      } else {
+        breaker.recordSuccess();
+      }
+
+      return response;
+    } catch (error) {
+      breaker.recordFailure(error instanceof Error ? error : new Error(String(error)));
+      throw error;
+    }
   }
 
   /**
@@ -577,6 +614,7 @@ export class BackendManager extends EventEmitter {
     promptCount: number;
     error?: string;
     lastErrorAt?: string;
+    circuitBreaker?: CircuitBreakerStats;
   }> {
     const status: Record<string, {
       status: string;
@@ -585,11 +623,13 @@ export class BackendManager extends EventEmitter {
       promptCount: number;
       error?: string;
       lastErrorAt?: string;
+      circuitBreaker?: CircuitBreakerStats;
     }> = {};
 
     for (const [id, backend] of this.backends) {
       // lastErrorAt is only available on BaseBackend; use runtime check to avoid type issues
       const maybeLastErrorAt = (backend as unknown as { lastErrorAt?: Date }).lastErrorAt;
+      const breaker = this.circuitBreakers.getBreaker(id);
       status[id] = {
         status: backend.status,
         toolCount: backend.tools.length,
@@ -597,6 +637,7 @@ export class BackendManager extends EventEmitter {
         promptCount: backend.prompts.length,
         error: backend.error,
         lastErrorAt: maybeLastErrorAt ? maybeLastErrorAt.toISOString() : undefined,
+        circuitBreaker: breaker.getStats(),
       };
     }
 

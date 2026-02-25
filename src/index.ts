@@ -12,6 +12,8 @@ import 'dotenv/config';
 import { MCPGatewayServer } from './server.js';
 import ConfigManager from './config.js';
 import { logger } from './logger.js';
+import { printStartupBanner } from './banner.js';
+import { setupGracefulShutdown } from './services/graceful-shutdown.js';
 
 async function main(): Promise<void> {
   logger.info('Starting MCP Gateway...');
@@ -39,15 +41,15 @@ async function main(): Promise<void> {
     logger.error('Error loading backends', { error: error.message });
   });
 
-  // Handle graceful shutdown
-  const shutdown = async (signal: string) => {
-    logger.info(`Received ${signal}, shutting down...`);
-    await server.stop();
-    process.exit(0);
-  };
-
-  process.on('SIGINT', () => shutdown('SIGINT'));
-  process.on('SIGTERM', () => shutdown('SIGTERM'));
+  // Set up graceful shutdown with connection draining
+  const httpServer = server.getHttpServer();
+  if (httpServer) {
+    setupGracefulShutdown({
+      server: httpServer,
+      backendManager: server.getBackendManager(),
+      gracePeriodMs: 15_000,
+    });
+  }
 
   // Log startup summary
   const backendManager = server.getBackendManager();
@@ -61,24 +63,14 @@ async function main(): Promise<void> {
     prompts: backendManager.getAllPrompts().length,
   });
 
-  console.log(`
-╔══════════════════════════════════════════════════════════════╗
-║                      MCP Gateway Ready                       ║
-╠══════════════════════════════════════════════════════════════╣
-║                                                              ║
-║  Dashboard:        http://localhost:${gatewayConfig.port}/dashboard           ║
-║  HTTP Streamable:  http://localhost:${gatewayConfig.port}/mcp                 ║
-║  SSE:              http://localhost:${gatewayConfig.port}/sse                 ║
-║  Health:           http://localhost:${gatewayConfig.port}/health              ║
-║                                                              ║
-║  Use these endpoints in your MCP clients:                    ║
-║  - Claude Desktop: Add as Remote MCP Server                  ║
-║  - Cursor: Settings → MCP → Add Server (HTTP/SSE)            ║
-║  - Codex: codex mcp add gateway --url <http-url>             ║
-║  - VS Code: Command Palette → MCP: Add Server (Remote)       ║
-║                                                              ║
-╚══════════════════════════════════════════════════════════════╝
-`);
+  printStartupBanner({
+    host: gatewayConfig.host || '0.0.0.0',
+    port: gatewayConfig.port,
+    backendCount: Object.keys(status).length,
+    toolCount: backendManager.getAllTools().length,
+    resourceCount: backendManager.getAllResources().length,
+    name: gatewayConfig.name,
+  });
 }
 
 main().catch((error) => {

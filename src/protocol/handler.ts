@@ -13,7 +13,7 @@ import {
 } from '../types.js';
 import { BackendManager } from '../backend/index.js';
 import { logger } from '../logger.js';
-import { createGatewayTools, GatewayTool } from '../code-execution/gateway-tools.js';
+import { createGatewayTools, GatewayTool } from '../code-execution/gateway-tools/index.js';
 import { getPIITokenizerForSession, clearPIITokenizerForSession } from '../code-execution/pii-tokenizer.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
@@ -37,6 +37,13 @@ function isToolAllowed(toolName: string): boolean {
   return allowedPrefixes.some(p => toolName.startsWith(p));
 }
 
+export interface ToolCallMetrics {
+  toolName: string;
+  backendId: string;
+  durationMs: number;
+  success: boolean;
+}
+
 export class MCPProtocolHandler {
   private sessions = new Map<string, GatewaySession>();
   private backendManager: BackendManager;
@@ -45,6 +52,7 @@ export class MCPProtocolHandler {
   private gatewayTools: GatewayTool[];
   private gatewayToolCall: (name: string, args: unknown, ctx?: { sessionId?: string }) => Promise<unknown>;
   private gatewayToolNames: Set<string>;
+  private onToolCall?: (metrics: ToolCallMetrics) => void;
 
   constructor(backendManager: BackendManager, gatewayName = 'mcp-gateway', gatewayVersion = '1.0.0') {
     this.backendManager = backendManager;
@@ -62,6 +70,13 @@ export class MCPProtocolHandler {
     this.gatewayToolNames = new Set(tools.map(t => t.name));
 
     logger.info(`Gateway tools initialized: ${tools.length} tools available`);
+  }
+
+  /**
+   * Set a callback to receive tool call metrics for analytics
+   */
+  setToolCallListener(listener: (metrics: ToolCallMetrics) => void): void {
+    this.onToolCall = listener;
   }
 
   /**
@@ -136,25 +151,25 @@ export class MCPProtocolHandler {
     switch (request.method) {
       case 'initialize':
         return this.handleInitialize(request, session);
-      
+
       case 'ping':
         return this.handlePing(request);
-      
+
       case 'tools/list':
         return this.handleToolsList(request, session);
-      
+
       case 'tools/call':
         return this.handleToolsCall(request, session);
-      
+
       case 'resources/list':
         return this.handleResourcesList(request, session);
-      
+
       case 'resources/read':
         return this.handleResourcesRead(request, session);
-      
+
       case 'prompts/list':
         return this.handlePromptsList(request, session);
-      
+
       case 'prompts/get':
         return this.handlePromptsGet(request, session);
 
@@ -184,7 +199,7 @@ export class MCPProtocolHandler {
         session.initialized = true;
         logger.info(`Session ${session.id} initialized`);
         break;
-      
+
       case 'notifications/cancelled':
         // Handle request cancellation
         logger.debug('Request cancelled', { params: notification.params });
@@ -292,8 +307,10 @@ export class MCPProtocolHandler {
 
     // Check if this is a gateway tool
     if (this.gatewayToolNames.has(params.name)) {
+      const gwStart = Date.now();
       try {
         const result = await this.gatewayToolCall(params.name, params.arguments ?? {}, { sessionId: session.id });
+        this.onToolCall?.({ toolName: params.name, backendId: 'gateway', durationMs: Date.now() - gwStart, success: true });
         return {
           jsonrpc: '2.0',
           id: request.id,
@@ -307,6 +324,7 @@ export class MCPProtocolHandler {
           },
         };
       } catch (error) {
+        this.onToolCall?.({ toolName: params.name, backendId: 'gateway', durationMs: Date.now() - gwStart, success: false });
         return {
           jsonrpc: '2.0',
           id: request.id,
@@ -338,7 +356,20 @@ export class MCPProtocolHandler {
       ? tokenizer.detokenizeObject(params.arguments ?? {})
       : (params.arguments ?? {});
 
+    const callStart = Date.now();
     const response = await this.backendManager.callTool(params.name, detokenizedArgs);
+    const durationMs = Date.now() - callStart;
+
+    // Record tool call metrics for analytics
+    if (this.onToolCall) {
+      const backendId = this.backendManager.getBackendForTool(params.name) ?? 'unknown';
+      this.onToolCall({
+        toolName: params.name,
+        backendId,
+        durationMs,
+        success: !response.error,
+      });
+    }
 
     // Tokenize outbound results to protect PII from entering model context
     if (response.result && tokenizer) {

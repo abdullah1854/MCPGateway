@@ -10,6 +10,7 @@ import { BackendManager } from '../backend/index.js';
 import ConfigManager from '../config.js';
 import { ServerConfigSchema, ServerConfig } from '../types.js';
 import { logger } from '../logger.js';
+import { generateTopology } from '../services/topology.js';
 import {
   getCachedUsageData,
   getUsageByDateRange,
@@ -53,6 +54,55 @@ function persistUIState(backendManager: BackendManager): void {
     disabledBackends: Array.from(backendManager.getDisabledBackends()),
   });
 }
+
+type HelperAgentId = 'kimi' | 'minimax' | 'zai' | 'codex';
+
+interface HelperAgentDefinition {
+  id: HelperAgentId;
+  displayName: string;
+  specialization: string;
+  primaryTaskTypes: string[];
+  fallbackTaskTypes: string[];
+  defaultModels: string[];
+}
+
+const HELPER_ROUTER_BACKEND_ID = 'multi-model-router';
+const HELPER_ROUTER_REQUIRED_TOOL_SUFFIXES = ['list_models', 'call_model', 'route_task'];
+
+const HELPER_AGENT_DEFINITIONS: HelperAgentDefinition[] = [
+  {
+    id: 'kimi',
+    displayName: 'Kimi K2.5',
+    specialization: 'Coding assistant for delegated implementation tasks and pair programming',
+    primaryTaskTypes: ['coding', 'implementation', 'file-editing'],
+    fallbackTaskTypes: ['general', 'debugging'],
+    defaultModels: ['kimi-k2-0905-preview'],
+  },
+  {
+    id: 'minimax',
+    displayName: 'Minimax M2.5',
+    specialization: 'Coding assistant for delegated implementation tasks and fast prototyping',
+    primaryTaskTypes: ['coding', 'implementation', 'file-editing'],
+    fallbackTaskTypes: ['general', 'fast'],
+    defaultModels: ['MiniMax-M2.5'],
+  },
+  {
+    id: 'zai',
+    displayName: 'Z.AI (GLM 4.7)',
+    specialization: 'Content writing, documentation, copywriting, and creative text generation',
+    primaryTaskTypes: ['content-writing', 'documentation', 'creative', 'copywriting'],
+    fallbackTaskTypes: ['translation', 'summarization'],
+    defaultModels: ['glm-4.7'],
+  },
+  {
+    id: 'codex',
+    displayName: 'Codex CLI',
+    specialization: 'Code review, planning, auditing, and architectural oversight',
+    primaryTaskTypes: ['code-review', 'planning', 'auditing', 'architecture'],
+    fallbackTaskTypes: ['analysis', 'general'],
+    defaultModels: ['codex-cli'],
+  },
+];
 
 export function createDashboardRoutes(backendManager: BackendManager): Router {
   const router = Router();
@@ -183,6 +233,59 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
       enabledTools: enabledTools.length,
       disabledTools: disabledTools.size,
       backends: backendManager.getStatus(),
+    });
+  });
+
+  // API: Helper agents routing and availability
+  router.get('/api/helper-agents', (_req: Request, res: Response) => {
+    const backends = backendManager.getBackends();
+    const status = backendManager.getStatus();
+    const disabledBackends = backendManager.getDisabledBackends();
+
+    const routerBackend = backends.get(HELPER_ROUTER_BACKEND_ID);
+    const routerStatus = status[HELPER_ROUTER_BACKEND_ID];
+    const routerEnabled = routerBackend ? !disabledBackends.has(HELPER_ROUTER_BACKEND_ID) : false;
+    const routerConnectionState = routerStatus?.status ?? 'not-configured';
+    const routerTools = routerBackend?.tools?.map(tool => tool.name) ?? [];
+    const normalizedPrefix = (routerBackend?.config.toolPrefix ?? 'multi').replace(/_+$/g, '');
+    const requiredTools = HELPER_ROUTER_REQUIRED_TOOL_SUFFIXES.map(
+      suffix => `${normalizedPrefix}_${suffix}`,
+    );
+    const missingTools = HELPER_ROUTER_REQUIRED_TOOL_SUFFIXES
+      .filter(suffix => !routerTools.some(toolName => toolName.endsWith(`_${suffix}`)))
+      .map(suffix => `${normalizedPrefix}_${suffix}`);
+
+    const routerAvailability = !routerBackend
+      ? 'not-configured'
+      : !routerEnabled
+        ? 'disabled'
+        : routerConnectionState === 'connected'
+          ? 'connected'
+          : 'disconnected';
+
+    const agents = HELPER_AGENT_DEFINITIONS.map(agent => ({
+      ...agent,
+      availability: routerAvailability === 'connected' ? 'available' : 'unavailable',
+      routeMethod:
+        agent.id === 'codex'
+          ? 'multi_route_task(taskType=\"file-editing\")'
+          : 'multi_route_task(taskType=...)',
+    }));
+
+    res.json({
+      router: {
+        id: HELPER_ROUTER_BACKEND_ID,
+        availability: routerAvailability,
+        status: routerConnectionState,
+        enabled: routerEnabled,
+        toolPrefix: `${normalizedPrefix}_`,
+        requiredTools,
+        availableTools: routerTools,
+        missingTools,
+        error: routerStatus?.error ?? null,
+      },
+      agents,
+      generatedAt: new Date().toISOString(),
     });
   });
 
@@ -1109,7 +1212,272 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
     }
   });
 
+  // ==============================================
+  // Topology API Routes (live system map)
+  // ==============================================
+
+  router.get('/api/topology', (_req: Request, res: Response) => {
+    res.json(generateTopology(backendManager));
+  });
+
+  router.get('/api/topology/mermaid', (_req: Request, res: Response) => {
+    const topology = generateTopology(backendManager);
+    res.setHeader('Content-Type', 'text/plain');
+    res.send(topology.mermaid);
+  });
+
+  // ==============================================
+  // Playground Route (interactive tool testing)
+  // ==============================================
+
+  router.get('/playground', (_req: Request, res: Response) => {
+    res.send(getPlaygroundHTML());
+  });
+
   return router;
+}
+
+// ==============================================
+// API Playground - Interactive Tool Tester
+// ==============================================
+
+function getPlaygroundHTML(): string {
+  return `<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>MCP Gateway - API Playground</title>
+  <style>
+    * { margin: 0; padding: 0; box-sizing: border-box; }
+    :root {
+      --bg: #0f172a; --surface: #1e293b; --border: #334155;
+      --text: #e2e8f0; --dim: #94a3b8; --accent: #38bdf8;
+      --green: #34d399; --red: #f87171; --yellow: #fbbf24;
+      --mono: 'SF Mono', 'Cascadia Code', 'Fira Code', 'Consolas', monospace;
+    }
+    body { background: var(--bg); color: var(--text); font-family: var(--mono); font-size: 13px; }
+    .header {
+      background: var(--surface); border-bottom: 1px solid var(--border);
+      padding: 12px 24px; display: flex; align-items: center; gap: 16px;
+    }
+    .header h1 { font-size: 16px; color: var(--accent); font-weight: 600; }
+    .header a { color: var(--dim); text-decoration: none; font-size: 12px; }
+    .header a:hover { color: var(--accent); }
+    .sr-only {
+      position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px;
+      overflow: hidden; clip: rect(0,0,0,0); white-space: nowrap; border: 0;
+    }
+    .container { display: grid; grid-template-columns: 320px 1fr; height: calc(100vh - 48px); }
+    .sidebar {
+      background: var(--surface); border-right: 1px solid var(--border);
+      overflow-y: auto; padding: 12px;
+    }
+    .search-box {
+      width: 100%; padding: 8px 12px; background: var(--bg); border: 1px solid var(--border);
+      color: var(--text); font-family: var(--mono); font-size: 12px; border-radius: 6px;
+      margin-bottom: 12px; outline: none;
+    }
+    .search-box:focus { border-color: var(--accent); }
+    .tool-item {
+      padding: 8px 10px; border-radius: 4px; cursor: pointer;
+      color: #b0bec5; font-size: 11px; word-break: break-all;
+    }
+    .tool-item:hover { background: rgba(56, 189, 248, 0.1); color: var(--text); }
+    .tool-item.active { background: rgba(56, 189, 248, 0.15); color: var(--accent); }
+    .main { display: flex; flex-direction: column; overflow: hidden; }
+    .tool-header { padding: 16px 24px; border-bottom: 1px solid var(--border); }
+    .tool-header h2 { font-size: 14px; color: var(--accent); }
+    .tool-header p { color: var(--dim); font-size: 12px; margin-top: 4px; }
+    .panels { display: grid; grid-template-rows: 1fr 1fr; flex: 1; overflow: hidden; }
+    .panel { display: flex; flex-direction: column; overflow: hidden; }
+    .panel-label {
+      padding: 6px 24px; background: var(--surface); border-bottom: 1px solid var(--border);
+      font-size: 11px; color: var(--dim); text-transform: uppercase; letter-spacing: 1px;
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    textarea {
+      flex: 1; padding: 16px 24px; background: var(--bg); border: none;
+      color: var(--text); font-family: var(--mono); font-size: 12px;
+      resize: none; outline: none; line-height: 1.6;
+    }
+    .response-area {
+      flex: 1; padding: 16px 24px; background: var(--bg); overflow-y: auto;
+      white-space: pre-wrap; word-wrap: break-word; line-height: 1.6;
+    }
+    .btn {
+      padding: 6px 16px; border: 1px solid var(--accent); background: transparent;
+      color: var(--accent); font-family: var(--mono); font-size: 11px;
+      border-radius: 4px; cursor: pointer; transition: all 0.15s;
+    }
+    .btn:hover { background: var(--accent); color: var(--bg); }
+    .btn:disabled { opacity: 0.4; cursor: not-allowed; }
+    .timing { color: var(--dim); font-size: 11px; }
+    .timing.success { color: var(--green); }
+    .timing.error { color: var(--red); }
+    .history-item {
+      padding: 6px 10px; border-radius: 4px; cursor: pointer;
+      display: flex; justify-content: space-between; font-size: 11px;
+    }
+    .history-item:hover { background: rgba(255,255,255,0.05); }
+    .history-item .name { color: var(--text); }
+    .history-item .time { color: var(--dim); }
+    .empty { color: var(--dim); text-align: center; padding: 40px; font-size: 12px; }
+    .badge {
+      display: inline-block; padding: 1px 6px; border-radius: 3px;
+      font-size: 10px; margin-left: 6px;
+    }
+    .badge.ok { background: rgba(52,211,153,0.15); color: var(--green); }
+    .badge.err { background: rgba(248,113,113,0.15); color: var(--red); }
+
+    @media (max-width: 768px) {
+      .container { grid-template-columns: 1fr; height: auto; }
+      .sidebar { max-height: 35vh; border-right: none; border-bottom: 1px solid var(--border); }
+      .main { min-height: 65vh; }
+      .panels { grid-template-rows: auto auto; }
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after { transition-duration: 0.01ms !important; }
+    }
+  </style>
+</head>
+<body>
+  <div class="header">
+    <h1>API Playground</h1>
+    <a href="/dashboard">&larr; Dashboard</a>
+    <span style="flex:1"></span>
+    <span class="timing" id="toolCount">Loading tools...</span>
+  </div>
+  <div class="container">
+    <div class="sidebar">
+      <label for="search" class="sr-only">Search tools</label>
+      <input class="search-box" id="search" placeholder="Search tools..." autocomplete="off" />
+      <div id="toolList"></div>
+    </div>
+    <div class="main">
+      <div class="tool-header" id="toolHeader">
+        <h2>Select a tool</h2>
+        <p>Choose a tool from the sidebar to begin testing</p>
+      </div>
+      <div class="panels">
+        <div class="panel">
+          <div class="panel-label">
+            <span>Arguments (JSON)</span>
+            <button class="btn" id="execBtn" disabled onclick="executeTool()">Execute</button>
+          </div>
+          <textarea id="argsEditor" placeholder='{ "key": "value" }'></textarea>
+        </div>
+        <div class="panel" style="border-top: 1px solid var(--border)">
+          <div class="panel-label">
+            <span>Response</span>
+            <span class="timing" id="timingDisplay"></span>
+          </div>
+          <div class="response-area" id="response"><span class="empty">Execute a tool to see results</span></div>
+        </div>
+      </div>
+    </div>
+  </div>
+  <script>
+    let tools = [], selectedTool = null, history = [];
+
+    async function loadTools() {
+      const res = await fetch('/dashboard/api/tools');
+      const data = await res.json();
+      tools = (data.tools || []).filter(t => t.enabled);
+      tools.sort((a, b) => a.name.localeCompare(b.name));
+      document.getElementById('toolCount').textContent = tools.length + ' tools';
+      renderToolList();
+    }
+
+    function renderToolList(filter = '') {
+      const list = document.getElementById('toolList');
+      const filtered = filter
+        ? tools.filter(t => t.name.toLowerCase().includes(filter.toLowerCase()))
+        : tools;
+      list.innerHTML = filtered.map(t =>
+        '<div class="tool-item' + (selectedTool?.name === t.name ? ' active' : '') +
+        '" onclick="selectTool(\\'' + t.name.replace(/'/g, "\\\\'") + '\\')">' + t.name + '</div>'
+      ).join('');
+    }
+
+    function selectTool(name) {
+      selectedTool = tools.find(t => t.name === name);
+      if (!selectedTool) return;
+      document.getElementById('toolHeader').innerHTML =
+        '<h2>' + selectedTool.name + '</h2>' +
+        '<p>' + (selectedTool.description || 'No description') + '</p>';
+      document.getElementById('execBtn').disabled = false;
+
+      // Build default args from schema
+      const schema = selectedTool.inputSchema;
+      if (schema?.properties) {
+        const obj = {};
+        for (const [k, v] of Object.entries(schema.properties)) {
+          if (v.default !== undefined) obj[k] = v.default;
+          else if (v.type === 'string') obj[k] = '';
+          else if (v.type === 'number') obj[k] = 0;
+          else if (v.type === 'boolean') obj[k] = false;
+        }
+        document.getElementById('argsEditor').value = JSON.stringify(obj, null, 2);
+      } else {
+        document.getElementById('argsEditor').value = '{}';
+      }
+      renderToolList(document.getElementById('search').value);
+    }
+
+    async function executeTool() {
+      if (!selectedTool) return;
+      const btn = document.getElementById('execBtn');
+      btn.disabled = true; btn.textContent = 'Running...';
+      const timing = document.getElementById('timingDisplay');
+      const respEl = document.getElementById('response');
+      respEl.textContent = 'Executing...';
+      timing.textContent = '';
+      timing.className = 'timing';
+
+      let args;
+      try { args = JSON.parse(document.getElementById('argsEditor').value || '{}'); }
+      catch (e) { respEl.textContent = 'Invalid JSON: ' + e.message; btn.disabled = false; btn.textContent = 'Execute'; return; }
+
+      const start = performance.now();
+      try {
+        const code = 'const r = await tools["' + selectedTool.name.replace(/"/g, '\\\\"') +
+          '"].call(' + JSON.stringify(args) + '); console.log(JSON.stringify(r, null, 2));';
+        const res = await fetch('/api/code/execute', {
+          method: 'POST', headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ code, timeout: 30000 })
+        });
+        const data = await res.json();
+        const elapsed = Math.round(performance.now() - start);
+
+        if (data.success) {
+          try { respEl.textContent = JSON.stringify(JSON.parse(data.output.join('\\n')), null, 2); }
+          catch { respEl.textContent = data.output.join('\\n'); }
+          timing.textContent = elapsed + 'ms';
+          timing.className = 'timing success';
+        } else {
+          respEl.textContent = data.error || data.output?.join('\\n') || 'Unknown error';
+          timing.textContent = elapsed + 'ms';
+          timing.className = 'timing error';
+        }
+      } catch (e) {
+        const elapsed = Math.round(performance.now() - start);
+        respEl.textContent = 'Fetch error: ' + e.message;
+        timing.textContent = elapsed + 'ms';
+        timing.className = 'timing error';
+      }
+      btn.disabled = false; btn.textContent = 'Execute';
+    }
+
+    document.getElementById('search').addEventListener('input', e => renderToolList(e.target.value));
+    document.getElementById('argsEditor').addEventListener('keydown', e => {
+      if ((e.metaKey || e.ctrlKey) && e.key === 'Enter') { e.preventDefault(); executeTool(); }
+    });
+    loadTools();
+  </script>
+</body>
+</html>`;
 }
 
 function getDashboardHTML(): string {
@@ -1121,61 +1489,67 @@ function getDashboardHTML(): string {
   <title>MCP Gateway Dashboard</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=DM+Sans:ital,opsz,wght@0,9..40,300;0,9..40,400;0,9..40,500;0,9..40,600;0,9..40,700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
   <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     :root {
-      /* Refined dark palette - less purple, more sophisticated */
-      --bg-primary: #09090b;
-      --bg-secondary: rgba(17, 17, 21, 0.98);
-      --bg-tertiary: rgba(24, 24, 32, 0.95);
-      --bg-card: rgba(20, 20, 28, 0.9);
-      --bg-glass: rgba(255, 255, 255, 0.03);
-      --bg-elevated: rgba(30, 30, 42, 0.95);
+      /* Obsidian Observatory - Deep obsidian with warm amber-gold */
+      --bg-primary: #0A0A0C;
+      --bg-secondary: rgba(14, 14, 18, 0.98);
+      --bg-tertiary: rgba(20, 20, 26, 0.95);
+      --bg-card: rgba(16, 16, 22, 0.92);
+      --bg-glass: rgba(255, 255, 255, 0.025);
+      --bg-elevated: rgba(26, 26, 34, 0.95);
 
-      /* Accent colors - more balanced */
-      --accent: #7c3aed;
-      --accent-secondary: #06b6d4;
-      --accent-tertiary: #ec4899;
-      --accent-glow: rgba(124, 58, 237, 0.4);
-      --accent-hover: #8b5cf6;
+      /* Accent colors - amber-gold primary, steel blue secondary */
+      --accent: #E2A93B;
+      --accent-secondary: #5B8DEF;
+      --accent-tertiary: #E25B7C;
+      --accent-glow: rgba(226, 169, 59, 0.35);
+      --accent-hover: #EBB94E;
 
       /* Status colors with softer glows */
-      --success: #10b981;
-      --success-glow: rgba(16, 185, 129, 0.25);
-      --warning: #f59e0b;
-      --warning-glow: rgba(245, 158, 11, 0.25);
-      --error: #ef4444;
-      --error-glow: rgba(239, 68, 68, 0.25);
+      --success: #34D399;
+      --success-glow: rgba(52, 211, 153, 0.25);
+      --warning: #FBBF24;
+      --warning-glow: rgba(251, 191, 36, 0.25);
+      --error: #F87171;
+      --error-glow: rgba(248, 113, 113, 0.25);
 
-      /* Text hierarchy */
-      --text-primary: #fafafa;
-      --text-secondary: #a1a1aa;
-      --text-muted: #71717a;
-      --text-dimmed: #52525b;
+      /* Text hierarchy - tuned for stronger readability */
+      --text-primary: #F5F0E8;
+      --text-secondary: #C5BEB7;
+      --text-muted: #9E968E;
+      --text-dimmed: #777067;
 
-      /* Borders */
-      --border: rgba(255, 255, 255, 0.08);
-      --border-hover: rgba(255, 255, 255, 0.15);
-      --border-active: rgba(124, 58, 237, 0.5);
+      /* Borders - warm undertone */
+      --border: rgba(226, 169, 59, 0.08);
+      --border-hover: rgba(226, 169, 59, 0.18);
+      --border-active: rgba(226, 169, 59, 0.5);
 
-      /* Gradients - more subtle */
-      --gradient-1: linear-gradient(135deg, #7c3aed 0%, #06b6d4 100%);
-      --gradient-2: linear-gradient(135deg, #ec4899 0%, #8b5cf6 100%);
-      --gradient-3: linear-gradient(180deg, rgba(124, 58, 237, 0.08) 0%, transparent 100%);
-      --gradient-subtle: linear-gradient(135deg, rgba(124, 58, 237, 0.05) 0%, rgba(6, 182, 212, 0.03) 100%);
+      /* Gradients - amber-gold + steel blue */
+      --gradient-1: linear-gradient(135deg, #E2A93B 0%, #5B8DEF 100%);
+      --gradient-2: linear-gradient(135deg, #E25B7C 0%, #E2A93B 100%);
+      --gradient-3: linear-gradient(180deg, rgba(226, 169, 59, 0.06) 0%, transparent 100%);
+      --gradient-subtle: linear-gradient(135deg, rgba(226, 169, 59, 0.04) 0%, rgba(91, 141, 239, 0.02) 100%);
 
-      /* Shadows */
-      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3);
-      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.4);
-      --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.5);
-      --shadow-glow: 0 0 40px rgba(124, 58, 237, 0.15);
+      /* Shadows - warm tones */
+      --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+      --shadow-md: 0 4px 12px rgba(0, 0, 0, 0.5);
+      --shadow-lg: 0 8px 24px rgba(0, 0, 0, 0.6);
+      --shadow-glow: 0 0 40px rgba(226, 169, 59, 0.1);
 
       /* Radius */
       --radius-sm: 8px;
       --radius-md: 12px;
       --radius-lg: 16px;
       --radius-xl: 20px;
+
+      /* Compatibility aliases used by older blocks */
+      --text: var(--text-primary);
+      --card-bg: var(--bg-card);
+      --primary: var(--accent);
+      --warning-rgb: 251, 191, 36;
     }
     
     * {
@@ -1185,11 +1559,27 @@ function getDashboardHTML(): string {
     }
     
     body {
-      font-family: 'DM Sans', -apple-system, BlinkMacSystemFont, sans-serif;
+      font-family: 'Instrument Sans', -apple-system, BlinkMacSystemFont, sans-serif;
       background: var(--bg-primary);
       color: var(--text-primary);
       min-height: 100vh;
       overflow-x: hidden;
+      line-height: 1.5;
+      text-rendering: optimizeLegibility;
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    /* Signature amber gradient strip at top of viewport */
+    body::after {
+      content: '';
+      position: fixed;
+      top: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: linear-gradient(90deg, #E2A93B, #5B8DEF, #E25B7C, #E2A93B);
+      z-index: 9999;
     }
 
     body::before {
@@ -1199,18 +1589,20 @@ function getDashboardHTML(): string {
       left: 0;
       right: 0;
       bottom: 0;
-      background: 
-        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(124, 58, 237, 0.15), transparent),
-        radial-gradient(ellipse 60% 40% at 100% 0%, rgba(6, 182, 212, 0.1), transparent),
-        radial-gradient(ellipse 50% 30% at 0% 100%, rgba(236, 72, 153, 0.08), transparent);
+      background:
+        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(226, 169, 59, 0.08), transparent),
+        radial-gradient(ellipse 60% 40% at 100% 0%, rgba(91, 141, 239, 0.06), transparent),
+        radial-gradient(ellipse 50% 30% at 0% 100%, rgba(226, 91, 124, 0.04), transparent);
       pointer-events: none;
-      z-index: -1;
+      z-index: -2;
+      /* Subtle grain texture */
+      filter: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)' opacity='0.03'/%3E%3C/svg%3E#g");
     }
     
     .container {
-      max-width: 1500px;
+      max-width: 1440px;
       margin: 0 auto;
-      padding: 2rem 2.5rem;
+      padding: clamp(1rem, 2.3vw, 2.25rem);
     }
     
     header {
@@ -1232,7 +1624,7 @@ function getDashboardHTML(): string {
       left: 0;
       right: 0;
       height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(124, 58, 237, 0.3), transparent);
+      background: linear-gradient(90deg, transparent, rgba(226, 169, 59, 0.4), transparent);
     }
 
     .logo-section {
@@ -1244,27 +1636,29 @@ function getDashboardHTML(): string {
     .logo-icon {
       width: 44px;
       height: 44px;
-      background: var(--gradient-1);
+      background: linear-gradient(135deg, #E2A93B, #D4942E);
       border-radius: var(--radius-md);
       display: flex;
       align-items: center;
       justify-content: center;
       font-size: 1.375rem;
-      box-shadow: var(--shadow-md);
+      box-shadow: 0 4px 16px rgba(226, 169, 59, 0.25);
     }
 
     h1 {
-      font-size: 1.375rem;
-      font-weight: 600;
+      font-size: 1.45rem;
+      font-weight: 700;
       color: var(--text-primary);
-      letter-spacing: -0.02em;
+      letter-spacing: -0.03em;
     }
 
     .header-subtitle {
-      font-size: 0.75rem;
-      color: var(--text-dimmed);
+      font-size: 0.74rem;
+      color: var(--text-muted);
       margin-top: 0.125rem;
-      letter-spacing: 0.01em;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+      font-family: 'IBM Plex Mono', monospace;
     }
     
     .stats {
@@ -1315,28 +1709,28 @@ function getDashboardHTML(): string {
       color: #fff;
     }
 
-    .stat:nth-child(1) .stat-value { 
-      background: linear-gradient(135deg, #34d399, #10b981);
+    .stat:nth-child(1) .stat-value {
+      background: linear-gradient(135deg, #34D399, #10B981);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
     }
-    .stat:nth-child(2) .stat-value { 
-      background: linear-gradient(135deg, #8b5cf6, #a78bfa);
+    .stat:nth-child(2) .stat-value {
+      background: linear-gradient(135deg, #E2A93B, #EBB94E);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
     }
-    .stat:nth-child(3) .stat-value { 
-      background: linear-gradient(135deg, #22d3ee, #67e8f9);
+    .stat:nth-child(3) .stat-value {
+      background: linear-gradient(135deg, #5B8DEF, #7BA4F5);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
     }
 
     .stat-label {
-      font-size: 0.65rem;
-      color: var(--text-muted);
+      font-size: 0.72rem;
+      color: var(--text-secondary);
       text-transform: uppercase;
       letter-spacing: 0.08em;
       font-weight: 500;
@@ -1368,9 +1762,9 @@ function getDashboardHTML(): string {
 
     .section-subtitle {
       color: var(--text-secondary);
-      font-size: 0.9rem;
+      font-size: 0.93rem;
       margin-top: 0.35rem;
-      line-height: 1.4;
+      line-height: 1.5;
     }
 
     .section-hint {
@@ -1399,8 +1793,9 @@ function getDashboardHTML(): string {
       border: 1px solid var(--border);
       border-radius: 14px;
       color: var(--text-primary);
-      font-size: 0.9rem;
+      font-size: 0.92rem;
       font-family: inherit;
+      min-height: 44px;
       transition: all 0.3s ease;
     }
     
@@ -1428,11 +1823,11 @@ function getDashboardHTML(): string {
     }
     
     .btn {
-      padding: 0.625rem 1.25rem;
-      border: none;
+      padding: 0.675rem 1.15rem;
+      border: 1px solid transparent;
       border-radius: var(--radius-sm);
-      font-size: 0.8125rem;
-      font-weight: 500;
+      font-size: 0.85rem;
+      font-weight: 600;
       font-family: inherit;
       cursor: pointer;
       transition: all 0.15s ease;
@@ -1440,6 +1835,9 @@ function getDashboardHTML(): string {
       align-items: center;
       gap: 0.5rem;
       position: relative;
+      min-height: 38px;
+      white-space: nowrap;
+      line-height: 1.2;
     }
 
     .btn-primary {
@@ -1463,6 +1861,15 @@ function getDashboardHTML(): string {
       background: var(--bg-elevated);
       border-color: var(--border-hover);
       color: var(--text-primary);
+    }
+
+    .btn:focus-visible {
+      box-shadow: 0 0 0 3px var(--accent-glow);
+    }
+
+    .btn:disabled {
+      opacity: 0.55;
+      cursor: not-allowed;
     }
     
     .backend-card {
@@ -1578,8 +1985,8 @@ function getDashboardHTML(): string {
     }
 
     .backend-name {
-      font-weight: 500;
-      font-size: 0.9375rem;
+      font-weight: 600;
+      font-size: 0.98rem;
       color: var(--text-primary);
     }
 
@@ -1672,7 +2079,7 @@ function getDashboardHTML(): string {
       justify-content: space-between;
       align-items: flex-start;
       gap: 0.75rem;
-      padding: 0.75rem 1.25rem;
+      padding: 0.875rem 1.25rem;
       border-top: 1px solid var(--border);
       transition: background 0.15s ease;
     }
@@ -1682,14 +2089,14 @@ function getDashboardHTML(): string {
     }
 
     .tool-name {
-      font-family: 'JetBrains Mono', monospace;
-      font-size: 0.8rem;
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.82rem;
       font-weight: 500;
       color: var(--accent-secondary);
       padding: 0.1875rem 0.5rem;
-      background: rgba(6, 182, 212, 0.08);
+      background: rgba(91, 141, 239, 0.08);
       border-radius: var(--radius-sm);
-      border: 1px solid rgba(6, 182, 212, 0.15);
+      border: 1px solid rgba(91, 141, 239, 0.15);
     }
 
     .tool-name.disabled {
@@ -1700,10 +2107,10 @@ function getDashboardHTML(): string {
     }
 
     .tool-desc {
-      font-size: 0.75rem;
+      font-size: 0.82rem;
       color: var(--text-secondary);
       margin-top: 0.375rem;
-      max-width: 500px;
+      max-width: 65ch;
       line-height: 1.5;
     }
 
@@ -1756,6 +2163,7 @@ function getDashboardHTML(): string {
       display: flex;
       align-items: center;
       gap: 0.375rem;
+      min-height: 40px;
     }
 
     .pill:hover, .pill.active {
@@ -1803,6 +2211,34 @@ function getDashboardHTML(): string {
       to { transform: rotate(360deg); }
     }
 
+    @keyframes cardEntrance {
+      from {
+        opacity: 0;
+        transform: translateY(12px);
+      }
+      to {
+        opacity: 1;
+        transform: translateY(0);
+      }
+    }
+
+    @keyframes pulse {
+      0%, 100% { opacity: 1; }
+      50% { opacity: 0.4; }
+    }
+
+    /* Selection highlight */
+    ::selection {
+      background: rgba(226, 169, 59, 0.3);
+      color: #F5F0E8;
+    }
+
+    /* Focus ring */
+    :focus-visible {
+      outline: 2px solid rgba(226, 169, 59, 0.5);
+      outline-offset: 2px;
+    }
+
     .stat {
       position: relative;
     }
@@ -1814,12 +2250,13 @@ function getDashboardHTML(): string {
     }
 
     .badge {
-      background: rgba(124, 58, 237, 0.15);
+      background: rgba(226, 169, 59, 0.15);
       color: var(--accent);
       padding: 0.125rem 0.375rem;
       border-radius: var(--radius-sm);
       font-size: 0.625rem;
       font-weight: 500;
+      font-family: 'IBM Plex Mono', monospace;
     }
 
     .btn-restart {
@@ -1989,7 +2426,7 @@ function getDashboardHTML(): string {
     .form-group textarea:focus {
       outline: none;
       border-color: var(--accent);
-      box-shadow: 0 0 0 2px rgba(124, 58, 237, 0.15);
+      box-shadow: 0 0 0 2px rgba(226, 169, 59, 0.15);
     }
 
     .form-group input::placeholder,
@@ -2010,7 +2447,7 @@ function getDashboardHTML(): string {
     .form-group textarea {
       resize: vertical;
       min-height: 80px;
-      font-family: 'JetBrains Mono', monospace;
+      font-family: 'IBM Plex Mono', monospace;
       font-size: 0.8rem;
       line-height: 1.5;
     }
@@ -2057,7 +2494,7 @@ function getDashboardHTML(): string {
     }
 
     .test-result.loading {
-      background: rgba(124, 58, 237, 0.1);
+      background: rgba(226, 169, 59, 0.1);
       border: 1px solid var(--accent);
       color: var(--accent);
     }
@@ -2149,7 +2586,7 @@ function getDashboardHTML(): string {
     }
 
     ::-webkit-scrollbar-thumb:hover {
-      background: var(--border-hover);
+      background: rgba(226, 169, 59, 0.3);
     }
 
     /* Responsive */
@@ -2361,8 +2798,8 @@ function getDashboardHTML(): string {
     }
 
     .live-session {
-      background: linear-gradient(135deg, rgba(139, 92, 246, 0.1), rgba(34, 211, 238, 0.1));
-      border: 1px solid var(--accent);
+      background: linear-gradient(135deg, rgba(226, 169, 59, 0.08), rgba(91, 141, 239, 0.06));
+      border: 1px solid rgba(226, 169, 59, 0.25);
       border-radius: 16px;
       padding: 1.25rem;
       margin-bottom: 1.5rem;
@@ -2419,20 +2856,29 @@ function getDashboardHTML(): string {
     .refresh-btn {
       background: var(--bg-glass);
       border: 1px solid var(--border);
-      padding: 0.5rem 1rem;
+      padding: 0.6rem 0.95rem;
       border-radius: 8px;
-      color: var(--text-secondary);
-      font-size: 0.8rem;
+      color: var(--text-primary);
+      font-size: 0.82rem;
+      font-weight: 600;
       cursor: pointer;
       transition: all 0.2s ease;
       display: inline-flex;
       align-items: center;
       gap: 0.5rem;
+      min-height: 38px;
     }
 
     .refresh-btn:hover {
       background: var(--bg-tertiary);
       border-color: var(--border-hover);
+    }
+
+    .memory-actions {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      flex-wrap: wrap;
     }
 
     /* Memory Tab Styles */
@@ -2479,7 +2925,7 @@ function getDashboardHTML(): string {
       left: 0;
       right: 0;
       height: 3px;
-      background: linear-gradient(135deg, #06b6d4 0%, #8b5cf6 100%);
+      background: linear-gradient(135deg, #E2A93B 0%, #5B8DEF 100%);
     }
 
     .memory-stat:hover {
@@ -2490,7 +2936,7 @@ function getDashboardHTML(): string {
     .memory-stat-value {
       font-size: 1.75rem;
       font-weight: 700;
-      background: linear-gradient(135deg, #06b6d4 0%, #8b5cf6 100%);
+      background: linear-gradient(135deg, #E2A93B 0%, #5B8DEF 100%);
       -webkit-background-clip: text;
       -webkit-text-fill-color: transparent;
       background-clip: text;
@@ -2536,7 +2982,7 @@ function getDashboardHTML(): string {
       left: 0;
       right: 0;
       height: 2px;
-      background: linear-gradient(90deg, #06b6d4, #8b5cf6, #ec4899);
+      background: linear-gradient(90deg, #E2A93B, #5B8DEF, #E25B7C);
       opacity: 0;
       transition: opacity 0.3s ease;
     }
@@ -2544,7 +2990,7 @@ function getDashboardHTML(): string {
     .memory-session-card:hover {
       border-color: var(--accent);
       transform: translateY(-3px);
-      box-shadow: 0 12px 40px rgba(139, 92, 246, 0.2);
+      box-shadow: 0 12px 40px rgba(226, 169, 59, 0.15);
     }
 
     .memory-session-card:hover::before {
@@ -2591,12 +3037,12 @@ function getDashboardHTML(): string {
       letter-spacing: 0.05em;
     }
 
-    .memory-badge.decision { background: rgba(139, 92, 246, 0.2); color: #a78bfa; }
-    .memory-badge.learning { background: rgba(34, 211, 153, 0.2); color: #34d399; }
-    .memory-badge.pattern { background: rgba(34, 211, 238, 0.2); color: #22d3ee; }
-    .memory-badge.insight { background: rgba(251, 191, 36, 0.2); color: #fbbf24; }
-    .memory-badge.blocker { background: rgba(248, 113, 113, 0.2); color: #f87171; }
-    .memory-badge.milestone { background: rgba(236, 72, 153, 0.2); color: #ec4899; }
+    .memory-badge.decision { background: rgba(226, 169, 59, 0.2); color: #E2A93B; }
+    .memory-badge.learning { background: rgba(52, 211, 153, 0.2); color: #34D399; }
+    .memory-badge.pattern { background: rgba(91, 141, 239, 0.2); color: #5B8DEF; }
+    .memory-badge.insight { background: rgba(251, 191, 36, 0.2); color: #FBBF24; }
+    .memory-badge.blocker { background: rgba(248, 113, 113, 0.2); color: #F87171; }
+    .memory-badge.milestone { background: rgba(226, 91, 124, 0.2); color: #E25B7C; }
 
     .memory-detail-panel {
       position: fixed;
@@ -2721,244 +3167,22 @@ function getDashboardHTML(): string {
       line-height: 1.5;
     }
 
-    /* Antigravity Tab Styles */
-    .antigravity-loading {
-      padding: 2rem;
-      text-align: center;
-      color: var(--text-muted);
-    }
-
-    .antigravity-status {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      padding: 1rem 1.25rem;
-      background: var(--bg-card);
-      border-radius: 12px;
-      border: 1px solid var(--border);
-      margin-bottom: 1.5rem;
-    }
-
-    .antigravity-status-indicator {
-      width: 10px;
-      height: 10px;
-      border-radius: 50%;
-      background: var(--error);
-      box-shadow: 0 0 8px var(--error-glow);
-    }
-
-    .antigravity-status-indicator.running {
-      background: var(--success);
-      box-shadow: 0 0 8px var(--success-glow);
-      animation: pulse 2s infinite;
-    }
-
-    @keyframes pulse {
-      0%, 100% { opacity: 1; }
-      50% { opacity: 0.5; }
-    }
-
-    .antigravity-status-text {
-      flex: 1;
-      font-size: 0.875rem;
-      color: var(--text-secondary);
-    }
-
-    .antigravity-status-text strong {
-      color: var(--text-primary);
-    }
-
-    .antigravity-accounts-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(350px, 1fr));
-      gap: 1.5rem;
-      margin-bottom: 2rem;
-    }
-
-    .antigravity-account-card {
-      background: var(--bg-card);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      border: 1px solid var(--border);
-      border-radius: 16px;
-      padding: 1.5rem;
+    /* AI Limits Tab Styles */
+    .ai-limits-frame-wrapper {
       position: relative;
-      overflow: hidden;
-      transition: all 0.3s ease;
-    }
-
-    .antigravity-account-card::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 3px;
-      background: linear-gradient(135deg, #f472b6 0%, #8b5cf6 100%);
-    }
-
-    .antigravity-account-card.techgravity::before {
-      background: linear-gradient(135deg, #22d3ee 0%, #10b981 100%);
-    }
-
-    .antigravity-account-card:hover {
-      border-color: var(--border-hover);
-      transform: translateY(-2px);
-      box-shadow: 0 8px 32px rgba(139, 92, 246, 0.15);
-    }
-
-    .antigravity-account-header {
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-      margin-bottom: 1.25rem;
-    }
-
-    .antigravity-account-icon {
-      width: 48px;
-      height: 48px;
-      background: linear-gradient(135deg, #f472b6 0%, #8b5cf6 100%);
+      width: 100%;
+      height: calc(100vh - 70px);
       border-radius: 12px;
-      display: flex;
-      align-items: center;
-      justify-content: center;
-    }
-
-    .antigravity-account-card.techgravity .antigravity-account-icon {
-      background: linear-gradient(135deg, #22d3ee 0%, #10b981 100%);
-    }
-
-    .antigravity-account-icon svg {
-      width: 24px;
-      height: 24px;
-      stroke: white;
-    }
-
-    .antigravity-account-name {
-      font-size: 1.125rem;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-
-    .antigravity-account-email {
-      font-size: 0.8rem;
-      color: var(--text-muted);
-      margin-top: 0.25rem;
-    }
-
-    .antigravity-stats-grid {
-      display: grid;
-      grid-template-columns: repeat(2, 1fr);
-      gap: 1rem;
-    }
-
-    .antigravity-stat {
-      background: var(--bg-glass);
-      padding: 1rem;
-      border-radius: 10px;
-      text-align: center;
-    }
-
-    .antigravity-stat-value {
-      font-size: 1.5rem;
-      font-weight: 700;
-      background: linear-gradient(135deg, #8b5cf6 0%, #22d3ee 100%);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
-    .antigravity-stat-label {
-      font-size: 0.7rem;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      margin-top: 0.25rem;
-    }
-
-    .antigravity-quota-section {
-      margin-top: 1rem;
-      padding-top: 1rem;
-      border-top: 1px solid var(--border);
-    }
-
-    .antigravity-quota-title {
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      margin-bottom: 0.75rem;
-    }
-
-    .antigravity-quota-bars {
-      display: flex;
-      flex-direction: column;
-      gap: 0.75rem;
-    }
-
-    .antigravity-quota-bar {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-    }
-
-    .antigravity-quota-model {
-      width: 110px;
-      font-size: 0.8rem;
-      color: var(--text-secondary);
-      white-space: nowrap;
       overflow: hidden;
-      text-overflow: ellipsis;
+      border: 1px solid var(--border);
+      background: #0d1219;
     }
 
-    .antigravity-quota-progress {
-      flex: 1;
-      height: 8px;
-      background: var(--bg-glass);
-      border-radius: 4px;
-      overflow: hidden;
-    }
-
-    .antigravity-quota-fill {
+    .ai-limits-iframe {
+      width: 100%;
       height: 100%;
-      border-radius: 4px;
-      transition: width 0.5s ease;
-    }
-
-    .antigravity-quota-fill.high {
-      background: linear-gradient(90deg, #10b981, #34d399);
-    }
-
-    .antigravity-quota-fill.medium {
-      background: linear-gradient(90deg, #f59e0b, #fbbf24);
-    }
-
-    .antigravity-quota-fill.low {
-      background: linear-gradient(90deg, #ef4444, #f87171);
-    }
-
-    .antigravity-quota-percent {
-      width: 45px;
-      font-size: 0.8rem;
-      font-weight: 600;
-      text-align: right;
-    }
-
-    .antigravity-quota-percent.high { color: var(--success); }
-    .antigravity-quota-percent.medium { color: var(--warning); }
-    .antigravity-quota-percent.low { color: var(--error); }
-
-    .antigravity-empty {
-      padding: 3rem;
-      text-align: center;
-      color: var(--text-muted);
-    }
-
-    .antigravity-empty svg {
-      width: 48px;
-      height: 48px;
-      margin-bottom: 1rem;
-      opacity: 0.5;
+      border: none;
+      background: #0d1219;
     }
 
     /* Skills Tab Styles */
@@ -3008,6 +3232,176 @@ function getDashboardHTML(): string {
       margin-top: 0.25rem;
     }
 
+    /* Helper Agents Tab */
+    .helper-router-status {
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      border-radius: 14px;
+      padding: 1rem 1.2rem;
+      margin-bottom: 1rem;
+    }
+
+    .helper-router-status.connected {
+      border-color: rgba(52, 211, 153, 0.45);
+    }
+
+    .helper-router-status.warning {
+      border-color: rgba(251, 191, 36, 0.5);
+    }
+
+    .helper-router-meta {
+      color: var(--text-secondary);
+      font-size: 0.9rem;
+      margin-top: 0.45rem;
+    }
+
+    .helper-test-panel {
+      border: 1px solid var(--border);
+      background: var(--bg-card);
+      border-radius: 14px;
+      padding: 1rem;
+      margin-bottom: 1rem;
+    }
+
+    .helper-test-row {
+      display: grid;
+      grid-template-columns: 180px 1fr;
+      gap: 0.75rem;
+      align-items: center;
+      margin-bottom: 0.75rem;
+    }
+
+    .helper-test-row label {
+      color: var(--text-muted);
+      font-size: 0.82rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      font-weight: 600;
+    }
+
+    .helper-test-row select,
+    .helper-test-row textarea {
+      width: 100%;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.03);
+      color: var(--text-primary);
+      padding: 0.6rem 0.7rem;
+      font-size: 0.9rem;
+      font-family: inherit;
+    }
+
+    .helper-test-row textarea {
+      min-height: 88px;
+      resize: vertical;
+      line-height: 1.45;
+    }
+
+    .helper-test-output {
+      margin-top: 0.8rem;
+      border: 1px solid var(--border);
+      border-radius: 10px;
+      padding: 0.75rem;
+      background: rgba(0, 0, 0, 0.22);
+      color: var(--text-secondary);
+      max-height: 320px;
+      overflow: auto;
+      font-size: 0.82rem;
+      line-height: 1.45;
+      white-space: pre-wrap;
+      word-break: break-word;
+      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
+    }
+
+    @media (max-width: 880px) {
+      .helper-test-row {
+        grid-template-columns: 1fr;
+      }
+    }
+
+    .helper-agent-grid {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
+      gap: 1rem;
+    }
+
+    .helper-agent-card {
+      background: var(--bg-card);
+      border: 1px solid var(--border);
+      border-radius: 14px;
+      padding: 1rem;
+      transition: border-color 0.2s ease, transform 0.2s ease;
+    }
+
+    .helper-agent-card:hover {
+      border-color: var(--border-hover);
+      transform: translateY(-2px);
+    }
+
+    .helper-agent-head {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      margin-bottom: 0.5rem;
+    }
+
+    .helper-agent-title {
+      font-weight: 700;
+      color: var(--text-primary);
+      font-size: 1rem;
+    }
+
+    .helper-agent-status {
+      font-size: 0.72rem;
+      letter-spacing: 0.04em;
+      text-transform: uppercase;
+      padding: 0.2rem 0.55rem;
+      border-radius: 999px;
+      border: 1px solid var(--border);
+      color: var(--text-muted);
+      background: rgba(255, 255, 255, 0.03);
+    }
+
+    .helper-agent-status.available {
+      color: var(--success);
+      border-color: rgba(52, 211, 153, 0.45);
+      background: rgba(52, 211, 153, 0.12);
+    }
+
+    .helper-agent-specialization {
+      color: var(--text-secondary);
+      line-height: 1.45;
+      font-size: 0.9rem;
+      margin-bottom: 0.85rem;
+    }
+
+    .helper-agent-section {
+      margin-bottom: 0.75rem;
+    }
+
+    .helper-agent-label {
+      color: var(--text-muted);
+      text-transform: uppercase;
+      font-size: 0.68rem;
+      letter-spacing: 0.08em;
+      margin-bottom: 0.45rem;
+    }
+
+    .helper-agent-tags {
+      display: flex;
+      gap: 0.4rem;
+      flex-wrap: wrap;
+    }
+
+    .helper-agent-tag {
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.03);
+      border-radius: 999px;
+      padding: 0.2rem 0.55rem;
+      font-size: 0.78rem;
+      color: var(--text-secondary);
+    }
+
     .skills-categories-grid {
       display: grid;
       grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
@@ -3051,7 +3445,7 @@ function getDashboardHTML(): string {
 
     .skill-category-card.selected {
       border-color: var(--accent);
-      background: rgba(139, 92, 246, 0.1);
+      background: rgba(226, 169, 59, 0.08);
     }
 
     .skill-category-card.selected::before {
@@ -3108,7 +3502,7 @@ function getDashboardHTML(): string {
       left: 0;
       right: 0;
       height: 2px;
-      background: linear-gradient(90deg, #8b5cf6, #22d3ee);
+      background: linear-gradient(90deg, #E2A93B, #5B8DEF);
       opacity: 0;
       transition: opacity 0.3s ease;
     }
@@ -3116,7 +3510,7 @@ function getDashboardHTML(): string {
     .skill-card:hover {
       border-color: var(--border-hover);
       transform: translateY(-3px);
-      box-shadow: 0 12px 40px rgba(139, 92, 246, 0.15);
+      box-shadow: 0 12px 40px rgba(226, 169, 59, 0.12);
     }
 
     .skill-card:hover::before {
@@ -3146,15 +3540,15 @@ function getDashboardHTML(): string {
     }
 
     .skill-source-badge.external {
-      background: rgba(34, 211, 238, 0.15);
-      color: #22d3ee;
-      border: 1px solid rgba(34, 211, 238, 0.3);
+      background: rgba(91, 141, 239, 0.15);
+      color: #5B8DEF;
+      border: 1px solid rgba(91, 141, 239, 0.3);
     }
 
     .skill-source-badge.workspace {
-      background: rgba(139, 92, 246, 0.15);
-      color: #a78bfa;
-      border: 1px solid rgba(139, 92, 246, 0.3);
+      background: rgba(226, 169, 59, 0.15);
+      color: #E2A93B;
+      border: 1px solid rgba(226, 169, 59, 0.3);
     }
 
     .skill-description {
@@ -3180,9 +3574,9 @@ function getDashboardHTML(): string {
       font-weight: 500;
       padding: 0.2rem 0.5rem;
       border-radius: 6px;
-      background: rgba(139, 92, 246, 0.15);
+      background: rgba(226, 169, 59, 0.15);
       color: var(--accent);
-      border: 1px solid rgba(139, 92, 246, 0.2);
+      border: 1px solid rgba(226, 169, 59, 0.2);
     }
 
     .skill-tag {
@@ -3254,7 +3648,7 @@ function getDashboardHTML(): string {
     .template-card:hover {
       border-color: var(--accent);
       border-style: solid;
-      background: rgba(139, 92, 246, 0.05);
+      background: rgba(226, 169, 59, 0.05);
     }
 
     .template-name {
@@ -3275,8 +3669,8 @@ function getDashboardHTML(): string {
       font-weight: 500;
       padding: 0.15rem 0.4rem;
       border-radius: 6px;
-      background: rgba(34, 211, 238, 0.15);
-      color: #22d3ee;
+      background: rgba(91, 141, 239, 0.15);
+      color: #5B8DEF;
       margin-top: 0.5rem;
     }
 
@@ -3302,12 +3696,25 @@ function getDashboardHTML(): string {
     }
 
     @media (max-width: 1024px) {
+      header {
+        flex-wrap: wrap;
+        gap: 0.75rem;
+      }
+
+      .logo-section {
+        flex: 1 1 auto;
+        min-width: 200px;
+      }
+
       .header-actions {
         flex-wrap: wrap;
+        justify-content: flex-end;
       }
       
       .stats {
         gap: 0.75rem;
+        flex-wrap: wrap;
+        justify-content: flex-end;
       }
 
       .stat {
@@ -3321,18 +3728,45 @@ function getDashboardHTML(): string {
 
     @media (max-width: 768px) {
       .container {
-        padding: 1.5rem;
+        padding: 1rem;
       }
 
       header {
         flex-direction: column;
-        gap: 1.5rem;
+        gap: 1rem;
         align-items: flex-start;
       }
 
       .header-actions {
         width: 100%;
-        justify-content: space-between;
+        justify-content: flex-start;
+        gap: 0.75rem;
+      }
+
+      .stats {
+        width: 100%;
+      }
+
+      .stat {
+        flex: 1 1 110px;
+        min-width: 110px;
+        min-height: 44px;
+      }
+
+      .stat:hover {
+        transform: none;
+      }
+
+      .tab-nav {
+        overflow-x: auto;
+        overflow-y: hidden;
+        padding-bottom: 0.45rem;
+      }
+
+      .tab-btn {
+        flex: 0 0 auto;
+        padding: 0.58rem 0.8rem;
+        font-size: 0.78rem;
       }
 
       .form-row {
@@ -3341,6 +3775,40 @@ function getDashboardHTML(): string {
 
       .backend-buttons {
         flex-wrap: wrap;
+      }
+
+      .controls {
+        gap: 0.75rem;
+      }
+
+      .quick-actions {
+        margin-left: 0;
+        width: 100%;
+        flex-wrap: wrap;
+      }
+
+      .section-header {
+        flex-direction: column;
+        align-items: flex-start;
+      }
+
+      .memory-search-container {
+        flex-direction: column;
+      }
+
+      .settings-card-header {
+        grid-template-columns: 1fr;
+        align-items: flex-start;
+      }
+
+      .settings-card-icon {
+        display: none;
+      }
+
+      .settings-info-item {
+        flex-direction: column;
+        align-items: flex-start;
+        gap: 0.35rem;
       }
     }
 
@@ -3352,23 +3820,46 @@ function getDashboardHTML(): string {
     }
 
     .settings-card {
-      background: var(--card-bg);
+      background: var(--bg-card);
       border: 1px solid var(--border);
-      border-radius: 12px;
+      border-radius: var(--radius-md);
       overflow: hidden;
+      box-shadow: var(--shadow-sm);
     }
 
     .settings-card-header {
-      padding: 1rem 1.5rem;
+      display: grid;
+      grid-template-columns: auto 1fr auto;
+      align-items: center;
+      gap: 0.9rem;
+      padding: 1.1rem 1.5rem;
       border-bottom: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.02);
+      background: linear-gradient(180deg, rgba(255, 255, 255, 0.03) 0%, transparent 100%);
     }
 
-    .settings-card-header h3 {
+    .settings-card-icon {
+      width: 40px;
+      height: 40px;
+      border-radius: 10px;
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      color: #fff;
+      box-shadow: 0 10px 20px rgba(16, 185, 129, 0.25);
+    }
+
+    .settings-card-title h3 {
       margin: 0;
       font-size: 1rem;
-      font-weight: 600;
-      color: var(--text);
+      font-weight: 650;
+      color: var(--text-primary);
+    }
+
+    .settings-card-title p {
+      margin: 0.2rem 0 0;
+      font-size: 0.82rem;
+      color: var(--text-secondary);
+      line-height: 1.45;
     }
 
     .settings-card-body {
@@ -3380,22 +3871,6 @@ function getDashboardHTML(): string {
       justify-content: space-between;
       align-items: center;
       gap: 1rem;
-    }
-
-    .settings-label {
-      display: flex;
-      flex-direction: column;
-      gap: 0.25rem;
-    }
-
-    .settings-label span:first-child {
-      font-weight: 500;
-      color: var(--text);
-    }
-
-    .settings-label small {
-      color: var(--text-secondary);
-      font-size: 0.85rem;
     }
 
     /* Toggle Switch */
@@ -3412,18 +3887,18 @@ function getDashboardHTML(): string {
       height: 0;
     }
 
-    .toggle-slider {
+    .toggle-switch .toggle-slider {
       position: absolute;
       top: 0;
       left: 0;
       right: 0;
       bottom: 0;
-      background-color: var(--border);
+      background-color: rgba(255, 255, 255, 0.14);
       border-radius: 28px;
       transition: 0.3s;
     }
 
-    .toggle-slider:before {
+    .toggle-switch .toggle-slider:before {
       position: absolute;
       content: "";
       height: 20px;
@@ -3453,50 +3928,69 @@ function getDashboardHTML(): string {
       margin-top: 1.5rem;
       padding-top: 1.5rem;
       border-top: 1px solid var(--border);
-    }
-
-    .settings-info-grid {
       display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 1rem;
+      gap: 0.75rem;
     }
 
-    .info-item {
+    .settings-info-item {
       display: flex;
-      flex-direction: column;
-      gap: 0.25rem;
+      justify-content: space-between;
+      align-items: center;
+      gap: 1rem;
+      padding: 0.7rem 0.85rem;
+      border-radius: 10px;
+      border: 1px solid var(--border);
+      background: rgba(255, 255, 255, 0.02);
     }
 
-    .info-item .info-label {
-      font-size: 0.75rem;
-      text-transform: uppercase;
-      letter-spacing: 0.5px;
+    .settings-label {
+      font-size: 0.78rem;
       color: var(--text-secondary);
+      text-transform: uppercase;
+      letter-spacing: 0.06em;
     }
 
-    .info-item .info-value {
-      font-weight: 500;
-      color: var(--text);
+    .settings-value {
+      font-weight: 650;
+      font-size: 0.88rem;
+      color: var(--text-primary);
+      font-variant-numeric: tabular-nums;
     }
 
-    .info-item .info-value.success {
+    .highlight-green {
       color: var(--success);
     }
 
-    .info-item .info-value.warning {
+    .settings-warning {
+      margin-top: 0.9rem;
+      padding: 0.65rem 0.75rem;
+      border-radius: 10px;
+      display: flex;
+      align-items: flex-start;
+      gap: 0.5rem;
+      background: rgba(251, 191, 36, 0.08);
+      border: 1px solid rgba(251, 191, 36, 0.35);
       color: var(--warning);
+      font-size: 0.82rem;
+      line-height: 1.45;
+    }
+
+    .settings-warning svg {
+      flex-shrink: 0;
+      margin-top: 0.05rem;
     }
 
     /* Settings Notice */
     .settings-notice {
       margin-top: 1rem;
       padding: 1rem;
-      background: rgba(var(--warning-rgb, 255, 193, 7), 0.1);
+      background: rgba(var(--warning-rgb), 0.12);
       border: 1px solid var(--warning);
       border-radius: 8px;
       display: flex;
       align-items: flex-start;
       gap: 0.75rem;
+      color: var(--text-primary);
     }
 
     .settings-notice.hidden {
@@ -3526,10 +4020,20 @@ function getDashboardHTML(): string {
       margin-top: 1rem;
       padding: 1rem;
       background: rgba(59, 130, 246, 0.1);
+      border: 1px solid rgba(59, 130, 246, 0.3);
       border-radius: 8px;
       color: var(--text-secondary);
-      font-size: 0.9rem;
+      font-size: 0.88rem;
       line-height: 1.5;
+    }
+
+    .settings-description code {
+      font-family: 'IBM Plex Mono', monospace;
+      font-size: 0.8em;
+      color: var(--text-primary);
+      background: rgba(255, 255, 255, 0.08);
+      padding: 0.1rem 0.3rem;
+      border-radius: 4px;
     }
 
     .settings-description ul {
@@ -3583,7 +4087,7 @@ function getDashboardHTML(): string {
 
     .overview-hero p {
       color: var(--text-muted);
-      font-size: 0.875rem;
+      font-size: 0.94rem;
       max-width: 500px;
       line-height: 1.5;
     }
@@ -3621,13 +4125,13 @@ function getDashboardHTML(): string {
       flex-shrink: 0;
     }
 
-    .overview-quick-stat-icon.servers { background: rgba(124, 58, 237, 0.12); }
+    .overview-quick-stat-icon.servers { background: rgba(226, 169, 59, 0.12); }
     .overview-quick-stat-icon.servers svg { stroke: var(--accent); }
-    .overview-quick-stat-icon.tools { background: rgba(6, 182, 212, 0.12); }
+    .overview-quick-stat-icon.tools { background: rgba(91, 141, 239, 0.12); }
     .overview-quick-stat-icon.tools svg { stroke: var(--accent-secondary); }
-    .overview-quick-stat-icon.skills { background: rgba(236, 72, 153, 0.12); }
+    .overview-quick-stat-icon.skills { background: rgba(226, 91, 124, 0.12); }
     .overview-quick-stat-icon.skills svg { stroke: var(--accent-tertiary); }
-    .overview-quick-stat-icon.memory { background: rgba(16, 185, 129, 0.12); }
+    .overview-quick-stat-icon.memory { background: rgba(52, 211, 153, 0.12); }
     .overview-quick-stat-icon.memory svg { stroke: var(--success); }
 
     .overview-quick-stat-icon svg {
@@ -3809,9 +4313,9 @@ function getDashboardHTML(): string {
       margin-top: 0.125rem;
     }
 
-    .activity-icon.memory { background: rgba(16, 185, 129, 0.1); }
-    .activity-icon.tool { background: rgba(124, 58, 237, 0.1); }
-    .activity-icon.backend { background: rgba(6, 182, 212, 0.1); }
+    .activity-icon.memory { background: rgba(52, 211, 153, 0.1); }
+    .activity-icon.tool { background: rgba(226, 169, 59, 0.1); }
+    .activity-icon.backend { background: rgba(91, 141, 239, 0.1); }
 
     .activity-content {
       flex: 1;
@@ -3874,10 +4378,10 @@ function getDashboardHTML(): string {
     }
 
     .quick-action-btn:hover svg {
-      stroke: var(--accent);
+      stroke: #E2A93B;
     }
 
-    /* Professional Tab Navigation */
+    /* Professional Tab Navigation - Obsidian Observatory */
     .tab-nav {
       display: flex;
       gap: 0.125rem;
@@ -3886,6 +4390,8 @@ function getDashboardHTML(): string {
       padding: 0.375rem;
       border-radius: var(--radius-md);
       border: 1px solid var(--border);
+      overflow-x: auto;
+      scrollbar-width: thin;
     }
 
     .tab-btn {
@@ -3898,10 +4404,12 @@ function getDashboardHTML(): string {
       font-weight: 500;
       font-family: inherit;
       cursor: pointer;
-      transition: all 0.15s ease;
+      transition: all 0.2s ease;
       display: flex;
       align-items: center;
       gap: 0.5rem;
+      white-space: nowrap;
+      flex: 0 0 auto;
     }
 
     .tab-btn:hover {
@@ -3910,20 +4418,34 @@ function getDashboardHTML(): string {
     }
 
     .tab-btn.active {
-      color: var(--text-primary);
-      background: var(--bg-tertiary);
-      box-shadow: var(--shadow-sm);
+      color: #E2A93B;
+      background: rgba(226, 169, 59, 0.08);
+      box-shadow: var(--shadow-sm), inset 0 0 0 1px rgba(226, 169, 59, 0.15);
     }
 
     .tab-btn svg {
       width: 14px;
       height: 14px;
-      opacity: 0.6;
+      opacity: 0.5;
+      transition: opacity 0.2s ease;
     }
 
-    .tab-btn:hover svg,
+    .tab-btn:hover svg {
+      opacity: 0.7;
+    }
+
     .tab-btn.active svg {
-      opacity: 0.9;
+      opacity: 1;
+      stroke: #E2A93B;
+    }
+
+    @media (prefers-reduced-motion: reduce) {
+      *, *::before, *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+      }
     }
 
     /* Staggered animations for all cards */
@@ -3973,10 +4495,10 @@ function getDashboardHTML(): string {
   <div class="container">
     <header>
       <div class="logo-section">
-        <div class="logo-icon">⚡</div>
+        <div class="logo-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0A0A0C" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg></div>
         <div>
           <h1>MCP Gateway</h1>
-          <div class="header-subtitle">Unified AI Tool Orchestration Platform</div>
+          <div class="header-subtitle">Unified AI Tool Orchestration</div>
         </div>
       </div>
       <div class="header-actions">
@@ -4006,39 +4528,43 @@ function getDashboardHTML(): string {
     </header>
 
     <!-- Tab Navigation -->
-    <div class="tab-nav">
-      <button class="tab-btn active" onclick="switchTab('overview')">
+    <div class="tab-nav" role="tablist" aria-label="Dashboard sections">
+      <button class="tab-btn active" data-tab="overview" id="tab-btn-overview" role="tab" aria-selected="true" aria-controls="tab-overview" tabindex="0" onclick="switchTab('overview')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="3" y="3" width="7" height="7"></rect><rect x="14" y="3" width="7" height="7"></rect><rect x="14" y="14" width="7" height="7"></rect><rect x="3" y="14" width="7" height="7"></rect></svg>
         Overview
       </button>
-      <button class="tab-btn" onclick="switchTab('servers')">
+      <button class="tab-btn" data-tab="servers" id="tab-btn-servers" role="tab" aria-selected="false" aria-controls="tab-servers" tabindex="-1" onclick="switchTab('servers')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
         Servers & Tools
       </button>
-      <button class="tab-btn" onclick="switchTab('memory')">
+      <button class="tab-btn" data-tab="helpers" id="tab-btn-helpers" role="tab" aria-selected="false" aria-controls="tab-helpers" tabindex="-1" onclick="switchTab('helpers')">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M16 11a4 4 0 1 0-8 0"></path><circle cx="12" cy="7" r="3"></circle><path d="M3 21c0-3.3 2.7-6 6-6"></path><path d="M21 21c0-3.3-2.7-6-6-6"></path><path d="M12 13v8"></path></svg>
+        Helper Agents
+      </button>
+      <button class="tab-btn" data-tab="memory" id="tab-btn-memory" role="tab" aria-selected="false" aria-controls="tab-memory" tabindex="-1" onclick="switchTab('memory')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 8v4l3 3"></path></svg>
         Memory
       </button>
-      <button class="tab-btn" onclick="switchTab('usage')">
+      <button class="tab-btn" data-tab="usage" id="tab-btn-usage" role="tab" aria-selected="false" aria-controls="tab-usage" tabindex="-1" onclick="switchTab('usage')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="20" x2="12" y2="10"></line><line x1="18" y1="20" x2="18" y2="4"></line><line x1="6" y1="20" x2="6" y2="16"></line></svg>
         Claude Usage
       </button>
-      <button class="tab-btn" onclick="switchTab('antigravity')" id="antigravity-tab-btn" style="display: none;">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"></path><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"></path><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"></path><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"></path></svg>
-        Antigravity
+      <button class="tab-btn" data-tab="antigravity" onclick="switchTab('antigravity')" id="antigravity-tab-btn" role="tab" aria-selected="false" aria-controls="tab-antigravity" tabindex="-1" style="display: none;">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
+        AI Limits
       </button>
-      <button class="tab-btn" onclick="switchTab('skills')">
+      <button class="tab-btn" data-tab="skills" id="tab-btn-skills" role="tab" aria-selected="false" aria-controls="tab-skills" tabindex="-1" onclick="switchTab('skills')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
         Skills
       </button>
-      <button class="tab-btn" onclick="switchTab('settings')">
+      <button class="tab-btn" data-tab="settings" id="tab-btn-settings" role="tab" aria-selected="false" aria-controls="tab-settings" tabindex="-1" onclick="switchTab('settings')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
         Settings
       </button>
     </div>
 
     <!-- Overview Tab -->
-    <div id="tab-overview" class="tab-content active">
+    <div id="tab-overview" class="tab-content active" role="tabpanel" aria-labelledby="tab-btn-overview">
       <!-- Hero Section -->
       <div class="overview-hero">
         <div class="overview-hero-content">
@@ -4096,6 +4622,10 @@ function getDashboardHTML(): string {
               <button class="quick-action-btn" onclick="switchTab('servers')">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect></svg>
                 Manage Servers
+              </button>
+              <button class="quick-action-btn" onclick="switchTab('helpers')">
+                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 11a4 4 0 1 0-8 0"></path><circle cx="12" cy="7" r="3"></circle><path d="M3 21c0-3.3 2.7-6 6-6"></path><path d="M21 21c0-3.3-2.7-6-6-6"></path><path d="M12 13v8"></path></svg>
+                Helper Agents
               </button>
               <button class="quick-action-btn" onclick="switchTab('skills')">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline></svg>
@@ -4193,7 +4723,7 @@ function getDashboardHTML(): string {
     </div>
 
     <!-- Servers Tab -->
-    <div id="tab-servers" class="tab-content">
+    <div id="tab-servers" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-servers" hidden>
       <div class="controls">
         <div class="search-box">
           <input type="text" id="search" placeholder="Search tools by name or description..." />
@@ -4224,8 +4754,65 @@ function getDashboardHTML(): string {
       </div>
     </div>
 
+    <!-- Helper Agents Tab -->
+    <div id="tab-helpers" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-helpers" hidden>
+      <div class="section-header">
+        <div>
+          <div class="section-title">Helper Agents</div>
+          <div class="section-subtitle">Team-of-agents routing view for Kimi, Minimax, Z.AI, and Codex CLI under the multi-model router.</div>
+        </div>
+        <button class="refresh-btn" onclick="refreshHelperAgents()">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+          Refresh
+        </button>
+      </div>
+
+      <div class="skills-stats-row" id="helper-agents-stats">
+        <div class="loading">Loading helper agent stats...</div>
+      </div>
+
+      <div id="helper-router-status" class="helper-router-status warning">
+        Loading router status...
+      </div>
+
+      <div class="helper-test-panel">
+        <div class="helper-test-row">
+          <label for="helper-test-task-type">Task Type</label>
+          <select id="helper-test-task-type">
+            <option value="file-editing" selected>file-editing</option>
+            <option value="research">research</option>
+            <option value="analysis">analysis</option>
+            <option value="creative">creative</option>
+            <option value="translation">translation</option>
+            <option value="summarization">summarization</option>
+            <option value="long-context">long-context</option>
+            <option value="fast">fast</option>
+            <option value="cheap">cheap</option>
+            <option value="general">general</option>
+          </select>
+        </div>
+        <div class="helper-test-row">
+          <label for="helper-test-prompt">Test Prompt</label>
+          <textarea id="helper-test-prompt">Run a no-op helper route smoke test. Do not make any file changes. Reply with one sentence containing OK and the working directory you would use.</textarea>
+        </div>
+        <div style="display:flex; justify-content:flex-end; gap:0.6rem;">
+          <button class="btn btn-secondary" onclick="resetHelperAgentTestPrompt()">
+            Reset Prompt
+          </button>
+          <button class="btn btn-success" onclick="runHelperAgentTestRoute()">
+            Run Test Route
+          </button>
+        </div>
+        <div id="helper-test-output" class="helper-test-output">No test run yet.</div>
+      </div>
+
+      <div id="helper-agents-grid" class="helper-agent-grid">
+        <div class="loading">Loading helper agents...</div>
+      </div>
+    </div>
+
     <!-- Memory Tab -->
-    <div id="tab-memory" class="tab-content">
+    <div id="tab-memory" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-memory" hidden>
       <div class="section-header">
         <div>
           <div class="section-title">Cipher Memory</div>
@@ -4276,7 +4863,7 @@ function getDashboardHTML(): string {
     </div>
 
     <!-- Claude Usage Tab -->
-    <div id="tab-usage" class="tab-content">
+    <div id="tab-usage" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-usage" hidden>
       <div class="section-header">
         <div>
           <div class="section-title">Claude Code Usage Analytics</div>
@@ -4300,33 +4887,15 @@ function getDashboardHTML(): string {
       <div id="usage-charts-container"></div>
     </div>
 
-    <!-- Antigravity Tab -->
-    <div id="tab-antigravity" class="tab-content">
-      <div class="section-header">
-        <div>
-          <div class="section-title">Antigravity Usage</div>
-          <div class="section-subtitle">Monitor your Antigravity IDE quota and usage across all accounts.</div>
-        </div>
-        <button class="refresh-btn" onclick="refreshAntigravityData()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
-          Refresh
-        </button>
+    <!-- AI Limits Tab -->
+    <div id="tab-antigravity" class="tab-content" role="tabpanel" aria-labelledby="antigravity-tab-btn" hidden>
+      <div class="ai-limits-frame-wrapper">
+        <iframe id="ai-limits-iframe" src="http://localhost:3011?embed=1" class="ai-limits-iframe" loading="lazy"></iframe>
       </div>
-
-      <!-- Connection Status -->
-      <div id="antigravity-status-container">
-        <div class="antigravity-loading">Checking Antigravity status...</div>
-      </div>
-
-      <!-- Account Cards -->
-      <div id="antigravity-accounts-container"></div>
-
-      <!-- Quota Overview -->
-      <div id="antigravity-quota-container"></div>
     </div>
 
     <!-- Skills Tab -->
-    <div id="tab-skills" class="tab-content">
+    <div id="tab-skills" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-skills" hidden>
       <div class="section-header">
         <div>
           <div class="section-title">Skills Library</div>
@@ -4393,7 +4962,7 @@ function getDashboardHTML(): string {
     </div>
 
     <!-- Settings Tab -->
-    <div id="tab-settings" class="tab-content">
+    <div id="tab-settings" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-settings" hidden>
       <div class="section-header">
         <div>
           <div class="section-title">Gateway Settings</div>
@@ -4597,6 +5166,7 @@ function getDashboardHTML(): string {
   <script>
     let backends = [];
     let tools = [];
+    let helperAgentsData = null;
     let searchQuery = '';
     let selectedBackend = null;
     let expandedBackends = new Set();
@@ -4622,8 +5192,213 @@ function getDashboardHTML(): string {
         updateStats();
         renderBackends();
         renderFilters();
+        if (currentTab === 'helpers' && helperAgentsData) {
+          await loadHelperAgents();
+        }
       } catch (err) {
         console.error('Failed to load data:', err);
+      }
+    }
+
+    function formatTaskTypeLabel(taskType) {
+      return taskType
+        .replace(/-/g, ' ')
+        .replace(/\\b\\w/g, c => c.toUpperCase());
+    }
+
+    function renderHelperAgents() {
+      const statsContainer = document.getElementById('helper-agents-stats');
+      const routerContainer = document.getElementById('helper-router-status');
+      const gridContainer = document.getElementById('helper-agents-grid');
+
+      if (!statsContainer || !routerContainer || !gridContainer || !helperAgentsData) {
+        return;
+      }
+
+      const agents = helperAgentsData.agents || [];
+      const availableCount = agents.filter(agent => agent.availability === 'available').length;
+      const unavailableCount = agents.length - availableCount;
+      const uniqueTaskTypes = Array.from(
+        new Set(agents.flatMap(agent => agent.primaryTaskTypes || [])),
+      );
+
+      statsContainer.innerHTML = \`
+        <div class="skills-stat">
+          <div class="skills-stat-value">\${agents.length}</div>
+          <div class="skills-stat-label">Helper Agents</div>
+        </div>
+        <div class="skills-stat">
+          <div class="skills-stat-value">\${availableCount}</div>
+          <div class="skills-stat-label">Available</div>
+        </div>
+        <div class="skills-stat">
+          <div class="skills-stat-value">\${unavailableCount}</div>
+          <div class="skills-stat-label">Unavailable</div>
+        </div>
+        <div class="skills-stat">
+          <div class="skills-stat-value">\${uniqueTaskTypes.length}</div>
+          <div class="skills-stat-label">Task Types</div>
+        </div>
+      \`;
+
+      const router = helperAgentsData.router || {};
+      const missingTools = router.missingTools || [];
+      const availableTools = router.availableTools || [];
+      const routerConnected = router.availability === 'connected';
+
+      routerContainer.className = \`helper-router-status \${routerConnected ? 'connected' : 'warning'}\`;
+      routerContainer.innerHTML = \`
+        <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap;">
+          <div style="font-weight:700; color: var(--text-primary);">Router Backend: \${escapeHtml(router.id || 'multi-model-router')}</div>
+          <span class="helper-agent-status \${routerConnected ? 'available' : ''}">
+            \${escapeHtml(router.availability || 'unknown')}
+          </span>
+        </div>
+        <div class="helper-router-meta">
+          Status: <strong>\${escapeHtml(router.status || 'unknown')}</strong> ·
+          Prefix: <code>\${escapeHtml(router.toolPrefix || 'multi_')}</code> ·
+          Tools: \${availableTools.length}
+        </div>
+        \${missingTools.length > 0
+          ? \`<div class="helper-router-meta">Missing tools: <code>\${missingTools.map(escapeHtml).join('</code>, <code>')}</code></div>\`
+          : '<div class="helper-router-meta">All required routing tools are available.</div>'
+        }
+      \`;
+
+      gridContainer.innerHTML = agents.map(agent => {
+        const primaryTags = (agent.primaryTaskTypes || [])
+          .map(taskType => \`<span class="helper-agent-tag">\${escapeHtml(formatTaskTypeLabel(taskType))}</span>\`)
+          .join('');
+        const fallbackTags = (agent.fallbackTaskTypes || [])
+          .map(taskType => \`<span class="helper-agent-tag">\${escapeHtml(formatTaskTypeLabel(taskType))}</span>\`)
+          .join('');
+        const modelTags = (agent.defaultModels || [])
+          .map(modelId => \`<span class="helper-agent-tag">\${escapeHtml(modelId)}</span>\`)
+          .join('');
+
+        return \`
+          <div class="helper-agent-card">
+            <div class="helper-agent-head">
+              <div class="helper-agent-title">\${escapeHtml(agent.displayName || agent.id)}</div>
+              <span class="helper-agent-status \${agent.availability === 'available' ? 'available' : ''}">
+                \${escapeHtml(agent.availability || 'unknown')}
+              </span>
+            </div>
+            <div class="helper-agent-specialization">\${escapeHtml(agent.specialization || '')}</div>
+            <div class="helper-agent-section">
+              <div class="helper-agent-label">Primary Task Types</div>
+              <div class="helper-agent-tags">\${primaryTags || '<span class="helper-agent-tag">None</span>'}</div>
+            </div>
+            <div class="helper-agent-section">
+              <div class="helper-agent-label">Fallback Task Types</div>
+              <div class="helper-agent-tags">\${fallbackTags || '<span class="helper-agent-tag">None</span>'}</div>
+            </div>
+            <div class="helper-agent-section">
+              <div class="helper-agent-label">Default Models</div>
+              <div class="helper-agent-tags">\${modelTags || '<span class="helper-agent-tag">N/A</span>'}</div>
+            </div>
+            <div class="helper-agent-label">Route</div>
+            <div style="color: var(--text-secondary); font-size: 0.85rem;"><code>\${escapeHtml(agent.routeMethod || 'multi_route_task(...)')}</code></div>
+          </div>
+        \`;
+      }).join('');
+    }
+
+    async function loadHelperAgents() {
+      const statsContainer = document.getElementById('helper-agents-stats');
+      const routerContainer = document.getElementById('helper-router-status');
+      const gridContainer = document.getElementById('helper-agents-grid');
+
+      if (statsContainer) {
+        statsContainer.innerHTML = '<div class="loading">Loading helper agent stats...</div>';
+      }
+      if (routerContainer) {
+        routerContainer.className = 'helper-router-status warning';
+        routerContainer.textContent = 'Loading router status...';
+      }
+      if (gridContainer) {
+        gridContainer.innerHTML = '<div class="loading">Loading helper agents...</div>';
+      }
+
+      try {
+        const res = await fetch('/dashboard/api/helper-agents');
+        if (!res.ok) {
+          throw new Error(\`API returned \${res.status}\`);
+        }
+        helperAgentsData = await res.json();
+        renderHelperAgents();
+      } catch (err) {
+        console.error('Failed to load helper agents:', err);
+        if (statsContainer) {
+          statsContainer.innerHTML = '<div class="overview-empty">Failed to load helper agent stats</div>';
+        }
+        if (routerContainer) {
+          routerContainer.className = 'helper-router-status warning';
+          routerContainer.innerHTML = '<div class="overview-empty">Failed to load router status</div>';
+        }
+        if (gridContainer) {
+          gridContainer.innerHTML = '<div class="overview-empty">Failed to load helper agents</div>';
+        }
+      }
+    }
+
+    function refreshHelperAgents() {
+      helperAgentsData = null;
+      loadHelperAgents();
+      showToast('Refreshing helper agents...');
+    }
+
+    function resetHelperAgentTestPrompt() {
+      const promptEl = document.getElementById('helper-test-prompt');
+      if (!promptEl) return;
+      promptEl.value = 'Run a no-op helper route smoke test. Do not make any file changes. Reply with one sentence containing OK and the working directory you would use.';
+      showToast('Test prompt reset');
+    }
+
+    async function runHelperAgentTestRoute() {
+      const taskTypeEl = document.getElementById('helper-test-task-type');
+      const promptEl = document.getElementById('helper-test-prompt');
+      const outputEl = document.getElementById('helper-test-output');
+
+      if (!taskTypeEl || !promptEl || !outputEl) {
+        showToast('Helper test controls not available', true);
+        return;
+      }
+
+      const taskType = taskTypeEl.value;
+      const prompt = promptEl.value.trim();
+      if (!prompt) {
+        showToast('Enter a prompt before running test route', true);
+        return;
+      }
+
+      outputEl.textContent = 'Running multi_route_task...';
+      try {
+        const res = await fetch('/api/code/tools/multi_route_task/call', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            args: {
+              taskType,
+              prompt,
+              maxTokens: 400,
+            },
+            smart: false,
+          }),
+        });
+
+        const data = await res.json();
+        if (!res.ok || !data.success) {
+          const errorMessage = data?.error || data?.message || ('HTTP ' + res.status);
+          throw new Error(errorMessage);
+        }
+
+        outputEl.textContent = JSON.stringify(data.result, null, 2);
+        showToast('Helper route test completed');
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        outputEl.textContent = 'Error: ' + message;
+        showToast('Helper route test failed', true);
       }
     }
     
@@ -5413,11 +6188,9 @@ function getDashboardHTML(): string {
       if (skillsTabBtn) skillsTabBtn.style.display = featureFlags.skills ? '' : 'none';
       if (skillsTab) skillsTab.style.display = featureFlags.skills ? '' : 'none';
 
-      // Antigravity tab - already has conditional visibility, but also apply feature flag
-      if (!featureFlags.antigravity) {
-        if (antigravityTabBtn) antigravityTabBtn.style.display = 'none';
-        if (antigravityTab) antigravityTab.style.display = 'none';
-      }
+      // AI Limits tab
+      if (antigravityTabBtn) antigravityTabBtn.style.display = featureFlags.antigravity ? '' : 'none';
+      if (antigravityTab) antigravityTab.style.display = featureFlags.antigravity ? '' : 'none';
 
       // Claude Usage tab
       if (usageTabBtn) usageTabBtn.style.display = featureFlags.claudeUsage ? '' : 'none';
@@ -5450,19 +6223,38 @@ function getDashboardHTML(): string {
       // Update tab buttons
       document.querySelectorAll('.tab-btn').forEach(btn => {
         btn.classList.remove('active');
+        btn.setAttribute('aria-selected', 'false');
+        btn.setAttribute('tabindex', '-1');
       });
-      document.querySelector(\`[onclick="switchTab('\${tabId}')"]\`).classList.add('active');
+      const targetBtn =
+        document.querySelector(\`.tab-btn[data-tab="\${tabId}"]\`) ||
+        document.querySelector(\`[onclick="switchTab('\${tabId}')"]\`);
+      if (targetBtn) {
+        targetBtn.classList.add('active');
+        targetBtn.setAttribute('aria-selected', 'true');
+        targetBtn.setAttribute('tabindex', '0');
+      }
 
       // Update tab content
       document.querySelectorAll('.tab-content').forEach(content => {
         content.classList.remove('active');
+        content.setAttribute('hidden', '');
       });
-      document.getElementById('tab-' + tabId).classList.add('active');
+      const activePanel = document.getElementById('tab-' + tabId);
+      if (activePanel) {
+        activePanel.classList.add('active');
+        activePanel.removeAttribute('hidden');
+      }
 
       // Load data for overview tab
       if (tabId === 'overview' && !overviewLoaded) {
         loadOverviewData();
         overviewLoaded = true;
+      }
+
+      // Load data for helper agents tab
+      if (tabId === 'helpers' && !helperAgentsData) {
+        loadHelperAgents();
       }
 
       // Load data for usage tab (only if Claude usage feature is enabled)
@@ -5475,14 +6267,10 @@ function getDashboardHTML(): string {
         loadMemoryData();
       }
 
-      // Load data for antigravity tab and start auto-refresh (only if antigravity feature is enabled)
-      if (tabId === 'antigravity' && featureFlags.antigravity) {
-        if (!antigravityData) {
-          loadAntigravityData();
-        }
-        startAntigravityAutoRefresh();
-      } else {
-        stopAntigravityAutoRefresh();
+      // AI Limits tab - hide main header to maximize iframe space
+      const mainHeader = document.querySelector('.container > header');
+      if (mainHeader) {
+        mainHeader.style.display = tabId === 'antigravity' ? 'none' : '';
       }
 
       // Load data for skills tab (only if skills feature is enabled)
@@ -5836,202 +6624,8 @@ function getDashboardHTML(): string {
     }
 
     // ==========================================
-    // Antigravity Usage
+    // AI Limits (embedded iframe)
     // ==========================================
-    let antigravityData = null;
-    let antigravityAvailable = false;
-
-    async function checkAntigravityAvailable() {
-      try {
-        const res = await fetch('/dashboard/api/antigravity/available');
-        const data = await res.json();
-        antigravityAvailable = data.available;
-
-        // Show/hide the tab button based on availability
-        const tabBtn = document.getElementById('antigravity-tab-btn');
-        if (tabBtn) {
-          tabBtn.style.display = antigravityAvailable ? 'flex' : 'none';
-        }
-
-        return antigravityAvailable;
-      } catch (err) {
-        console.error('Failed to check Antigravity availability:', err);
-        return false;
-      }
-    }
-
-    async function loadAntigravityData() {
-      const statusContainer = document.getElementById('antigravity-status-container');
-      const accountsContainer = document.getElementById('antigravity-accounts-container');
-
-      statusContainer.innerHTML = '<div class="antigravity-loading">Checking Antigravity status...</div>';
-      accountsContainer.innerHTML = '';
-
-      try {
-        const res = await fetch('/dashboard/api/antigravity/summary');
-
-        if (!res.ok) {
-          const error = await res.json();
-          statusContainer.innerHTML = \`
-            <div class="antigravity-empty">
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"></path><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"></path></svg>
-              <p><strong>Failed to load Antigravity data</strong></p>
-              <p>\${error.message || 'Unknown error'}</p>
-            </div>
-          \`;
-          return;
-        }
-
-        antigravityData = await res.json();
-        renderAntigravityStatus();
-        renderAntigravityAccounts();
-      } catch (err) {
-        statusContainer.innerHTML = \`
-          <div class="antigravity-empty">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"></path><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"></path></svg>
-            <p><strong>Error loading Antigravity data</strong></p>
-            <p>\${err.message}</p>
-          </div>
-        \`;
-      }
-    }
-
-    function renderAntigravityStatus() {
-      if (!antigravityData) return;
-
-      const container = document.getElementById('antigravity-status-container');
-      const status = antigravityData.status;
-
-      const statusClass = status.isRunning ? 'running' : '';
-      const statusText = status.isRunning
-        ? \`<strong>Antigravity IDE is running</strong> (PID: \${status.processId}\${status.port ? ', Port: ' + status.port : ''})\`
-        : '<strong>Antigravity IDE is not running</strong> — Start the IDE to see live quota data';
-
-      container.innerHTML = \`
-        <div class="antigravity-status">
-          <div class="antigravity-status-indicator \${statusClass}"></div>
-          <div class="antigravity-status-text">\${statusText}</div>
-        </div>
-      \`;
-    }
-
-    function renderAntigravityAccounts() {
-      if (!antigravityData) return;
-
-      const container = document.getElementById('antigravity-accounts-container');
-      const accounts = antigravityData.status.accounts;
-
-      if (!accounts || accounts.length === 0) {
-        container.innerHTML = \`
-          <div class="antigravity-empty">
-            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"></path><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"></path></svg>
-            <p>No Antigravity accounts found</p>
-          </div>
-        \`;
-        return;
-      }
-
-      const rocketIcon = '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M4.5 16.5c-1.5 1.26-2 5-2 5s3.74-.5 5-2c.71-.84.7-2.13-.09-2.91a2.18 2.18 0 0 0-2.91-.09z"></path><path d="m12 15-3-3a22 22 0 0 1 2-3.95A12.88 12.88 0 0 1 22 2c0 2.72-.78 7.5-6 11a22.35 22.35 0 0 1-4 2z"></path><path d="M9 12H4s.55-3.03 2-4c1.62-1.08 5 0 5 0"></path><path d="M12 15v5s3.03-.55 4-2c1.08-1.62 0-5 0-5"></path></svg>';
-
-      const cardsHTML = accounts.map(account => {
-        const convStats = antigravityData.conversationStats[account.accountId] || {};
-        const brainStats = antigravityData.brainStats[account.accountId] || {};
-
-        const accountName = account.accountId === 'primary' ? 'Antigravity' : 'Techgravity';
-        const cardClass = account.accountId === 'techgravity' ? 'techgravity' : '';
-
-        // Render quota bars
-        const quotaBarsHTML = account.models.map(model => {
-          const pct = model.remainingPercentage;
-          const level = pct > 50 ? 'high' : pct > 20 ? 'medium' : 'low';
-          return \`
-            <div class="antigravity-quota-bar">
-              <div class="antigravity-quota-model">\${model.label}</div>
-              <div class="antigravity-quota-progress">
-                <div class="antigravity-quota-fill \${level}" style="width: \${pct}%"></div>
-              </div>
-              <div class="antigravity-quota-percent \${level}">\${pct}%</div>
-            </div>
-          \`;
-        }).join('');
-
-        return \`
-          <div class="antigravity-account-card \${cardClass}">
-            <div class="antigravity-account-header">
-              <div class="antigravity-account-icon">\${rocketIcon}</div>
-              <div>
-                <div class="antigravity-account-name">\${accountName}</div>
-                \${account.accountEmail ? \`<div class="antigravity-account-email">\${account.accountEmail}</div>\` : ''}
-              </div>
-            </div>
-            <div class="antigravity-stats-grid">
-              <div class="antigravity-stat">
-                <div class="antigravity-stat-value">\${convStats.totalConversations || 0}</div>
-                <div class="antigravity-stat-label">Conversations</div>
-              </div>
-              <div class="antigravity-stat">
-                <div class="antigravity-stat-value">\${convStats.formattedSize || '0 B'}</div>
-                <div class="antigravity-stat-label">Data Size</div>
-              </div>
-              <div class="antigravity-stat">
-                <div class="antigravity-stat-value">\${brainStats.totalTasks || 0}</div>
-                <div class="antigravity-stat-label">Brain Tasks</div>
-              </div>
-              <div class="antigravity-stat">
-                <div class="antigravity-stat-value">\${convStats.recentConversations || 0}</div>
-                <div class="antigravity-stat-label">This Week</div>
-              </div>
-            </div>
-            <div class="antigravity-quota-section">
-              <div class="antigravity-quota-title">Model Quota (Estimated)</div>
-              <div class="antigravity-quota-bars">\${quotaBarsHTML}</div>
-            </div>
-          </div>
-        \`;
-      }).join('');
-
-      container.innerHTML = \`<div class="antigravity-accounts-grid">\${cardsHTML}</div>\`;
-    }
-
-    async function refreshAntigravityData() {
-      antigravityData = null;
-      try {
-        await fetch('/dashboard/api/antigravity/refresh', { method: 'POST' });
-      } catch (err) {
-        console.error('Failed to refresh:', err);
-      }
-      loadAntigravityData();
-      showToast('Antigravity data refreshed');
-    }
-
-    // Auto-refresh Antigravity data when tab is active
-    let antigravityAutoRefreshInterval = null;
-    const ANTIGRAVITY_REFRESH_INTERVAL = 15000; // 15 seconds
-
-    function startAntigravityAutoRefresh() {
-      if (antigravityAutoRefreshInterval) return;
-      antigravityAutoRefreshInterval = setInterval(async () => {
-        if (currentTab !== 'antigravity') return;
-        try {
-          await fetch('/dashboard/api/antigravity/refresh', { method: 'POST' });
-          const res = await fetch('/dashboard/api/antigravity/summary');
-          if (res.ok) {
-            antigravityData = await res.json();
-            renderAntigravityStatus();
-            renderAntigravityAccounts();
-          }
-        } catch (err) {
-          console.error('Auto-refresh failed:', err);
-        }
-      }, ANTIGRAVITY_REFRESH_INTERVAL);
-    }
-
-    function stopAntigravityAutoRefresh() {
-      if (antigravityAutoRefreshInterval) {
-        clearInterval(antigravityAutoRefreshInterval);
-        antigravityAutoRefreshInterval = null;
-      }
-    }
 
     // ==========================================
     // Claude Usage Analytics
@@ -6153,16 +6747,16 @@ function getDashboardHTML(): string {
 
       // Get model colors
       const modelColors = {
-        'Claude Opus': '#8b5cf6',
-        'Claude Sonnet': '#22d3ee',
-        'Claude Haiku': '#34d399',
+        'Claude Opus': '#E2A93B',
+        'Claude Sonnet': '#5B8DEF',
+        'Claude Haiku': '#34D399',
       };
 
       // Build model breakdown HTML
       const modelBreakdownHTML = usageData.modelDistribution
         .slice(0, 5)
         .map((m, i) => {
-          const color = modelColors[m.model] || ['#f87171', '#fbbf24', '#a78bfa'][i % 3];
+          const color = modelColors[m.model] || ['#F87171', '#FBBF24', '#E2A93B'][i % 3];
           return \`
             <div class="model-item">
               <div class="model-color" style="background: \${color}"></div>
@@ -6248,8 +6842,8 @@ function getDashboardHTML(): string {
           datasets: [{
             label: 'Daily Cost',
             data: recentData.map(d => d.totalCost),
-            backgroundColor: 'rgba(139, 92, 246, 0.6)',
-            borderColor: 'rgba(139, 92, 246, 1)',
+            backgroundColor: 'rgba(226, 169, 59, 0.6)',
+            borderColor: 'rgba(226, 169, 59, 1)',
             borderWidth: 1,
             borderRadius: 4,
           }]
@@ -6297,7 +6891,7 @@ function getDashboardHTML(): string {
       const ctx = document.getElementById('model-chart');
       if (!ctx || !usageData?.modelDistribution) return;
 
-      const colors = ['#8b5cf6', '#22d3ee', '#34d399', '#fbbf24', '#f87171'];
+      const colors = ['#E2A93B', '#5B8DEF', '#34D399', '#FBBF24', '#E25B7C'];
       const data = usageData.modelDistribution.slice(0, 5);
 
       if (modelChart) {
@@ -6347,7 +6941,7 @@ function getDashboardHTML(): string {
           labels: ['Cache Write', 'Cache Read', 'Input', 'Output'],
           datasets: [{
             data: [cacheWrite, cacheRead, input, output].map(v => v / 1000000),
-            backgroundColor: ['#fbbf24', '#34d399', '#8b5cf6', '#22d3ee'],
+            backgroundColor: ['#FBBF24', '#34D399', '#E2A93B', '#5B8DEF'],
             borderWidth: 0,
             borderRadius: 4,
           }]
@@ -6528,11 +7122,11 @@ function getDashboardHTML(): string {
       container.innerHTML = \`
         <div class="memory-stats-grid">
           <div class="memory-stat">
-            <div class="memory-stat-value" style="color: #22d3ee;">\${totalMemories}</div>
+            <div class="memory-stat-value" style="color: #5B8DEF;">\${totalMemories}</div>
             <div class="memory-stat-label">Total Memories</div>
           </div>
           <div class="memory-stat">
-            <div class="memory-stat-value" style="color: #a78bfa;">\${decisions}</div>
+            <div class="memory-stat-value" style="color: #E2A93B;">\${decisions}</div>
             <div class="memory-stat-label">Decisions</div>
           </div>
           <div class="memory-stat">
@@ -6544,12 +7138,12 @@ function getDashboardHTML(): string {
             <div class="memory-stat-label">Patterns & Insights</div>
           </div>
         </div>
-        <div style="margin-top: 1rem; padding: 0.75rem 1rem; background: rgba(139, 92, 246, 0.1); border: 1px solid rgba(139, 92, 246, 0.2); border-radius: 8px; font-size: 0.85rem;">
+        <div style="margin-top: 1rem; padding: 0.75rem 1rem; background: rgba(226, 169, 59, 0.08); border: 1px solid rgba(226, 169, 59, 0.15); border-radius: 8px; font-size: 0.85rem;">
           <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#a78bfa" stroke-width="2.5" stroke-linecap="round"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg>
-            <strong style="color: #a78bfa;">Qdrant Cloud Storage</strong>
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#E2A93B" stroke-width="2.5" stroke-linecap="round"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg>
+            <strong style="color: #E2A93B;">Qdrant Cloud Storage</strong>
           </div>
-          <div style="opacity: 0.8;">Memories are stored in Qdrant Cloud with 20-day TTL. Pass <code style="background: rgba(139, 92, 246, 0.2); padding: 0.1rem 0.3rem; border-radius: 4px;">projectPath</code> to <code style="background: rgba(139, 92, 246, 0.2); padding: 0.1rem 0.3rem; border-radius: 4px;">ask_cipher</code> for cross-IDE persistence.</div>
+          <div style="opacity: 0.8;">Memories are stored in Qdrant Cloud with 20-day TTL. Pass <code style="background: rgba(226, 169, 59, 0.15); padding: 0.1rem 0.3rem; border-radius: 4px;">projectPath</code> to <code style="background: rgba(226, 169, 59, 0.15); padding: 0.1rem 0.3rem; border-radius: 4px;">ask_cipher</code> for cross-IDE persistence.</div>
         </div>
       \`;
     }
@@ -6606,7 +7200,7 @@ function getDashboardHTML(): string {
             </div>
             <div class="memory-session-meta" style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
               \${badgeText ? \`<span class="memory-badge \${badgeType}">\${badgeText}</span>\` : ''}
-              \${projectName ? \`<span style="background: rgba(34, 211, 238, 0.15); color: #22d3ee; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.75rem;">\${escapeHtml(projectName)}</span>\` : ''}
+              \${projectName ? \`<span style="background: rgba(91, 141, 239, 0.15); color: #5B8DEF; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.75rem;">\${escapeHtml(projectName)}</span>\` : ''}
               <span style="opacity: 0.6;">\${formattedDate}</span>
             </div>
           </div>
@@ -6614,7 +7208,7 @@ function getDashboardHTML(): string {
       }).join('');
 
       container.innerHTML = \`
-        <div style="margin-bottom: 0.75rem; font-size: 0.9rem; color: #94a3b8;">Recent Memories (from Qdrant Cloud)</div>
+        <div style="margin-bottom: 0.75rem; font-size: 0.9rem; color: #9B9590;">Recent Memories (from Qdrant Cloud)</div>
         <div class="memory-sessions-grid">\${memoriesHTML}</div>
       \`;
     }
@@ -6673,34 +7267,34 @@ function getDashboardHTML(): string {
           <div style="display: flex; flex-direction: column; gap: 1rem;">
             <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
               \${badgeText ? \`<span class="memory-badge \${badgeType}" style="font-size: 0.85rem;">\${badgeText}</span>\` : ''}
-              \${projectName ? \`<span style="background: rgba(34, 211, 238, 0.15); color: #22d3ee; padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.8rem;">\${escapeHtml(projectName)}</span>\` : ''}
+              \${projectName ? \`<span style="background: rgba(91, 141, 239, 0.15); color: #5B8DEF; padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.8rem;">\${escapeHtml(projectName)}</span>\` : ''}
             </div>
 
-            <div style="background: rgba(30, 41, 59, 0.5); padding: 1rem; border-radius: 8px; border: 1px solid rgba(148, 163, 184, 0.1);">
-              <div style="font-size: 0.75rem; color: #64748b; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em;">Content</div>
+            <div style="background: rgba(16, 16, 22, 0.5); padding: 1rem; border-radius: 8px; border: 1px solid rgba(226, 169, 59, 0.08);">
+              <div style="font-size: 0.75rem; color: #6B6560; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em;">Content</div>
               <div style="font-size: 0.95rem; line-height: 1.6; white-space: pre-wrap; word-break: break-word;">\${escapeHtml(memory.text || 'Empty memory')}</div>
             </div>
 
             <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem;">
-              <div style="background: rgba(30, 41, 59, 0.3); padding: 0.75rem; border-radius: 6px;">
-                <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Timestamp</div>
+              <div style="background: rgba(16, 16, 22, 0.3); padding: 0.75rem; border-radius: 6px;">
+                <div style="font-size: 0.7rem; color: #6B6560; text-transform: uppercase; letter-spacing: 0.05em;">Timestamp</div>
                 <div style="font-size: 0.85rem; margin-top: 0.25rem;">\${timestamp}</div>
               </div>
-              <div style="background: rgba(30, 41, 59, 0.3); padding: 0.75rem; border-radius: 6px;">
-                <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Project Path</div>
+              <div style="background: rgba(16, 16, 22, 0.3); padding: 0.75rem; border-radius: 6px;">
+                <div style="font-size: 0.7rem; color: #6B6560; text-transform: uppercase; letter-spacing: 0.05em;">Project Path</div>
                 <div style="font-size: 0.85rem; margin-top: 0.25rem; word-break: break-all;">\${escapeHtml(memory.projectPath || 'Not specified')}</div>
               </div>
-              <div style="background: rgba(30, 41, 59, 0.3); padding: 0.75rem; border-radius: 6px;">
-                <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em;">Memory ID</div>
+              <div style="background: rgba(16, 16, 22, 0.3); padding: 0.75rem; border-radius: 6px;">
+                <div style="font-size: 0.7rem; color: #6B6560; text-transform: uppercase; letter-spacing: 0.05em;">Memory ID</div>
                 <div style="font-size: 0.75rem; margin-top: 0.25rem; font-family: monospace; word-break: break-all; opacity: 0.7;">\${escapeHtml(memoryId)}</div>
               </div>
             </div>
 
             \${memory.tags && memory.tags.length > 0 ? \`
               <div>
-                <div style="font-size: 0.7rem; color: #64748b; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">Tags</div>
+                <div style="font-size: 0.7rem; color: #6B6560; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">Tags</div>
                 <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                  \${memory.tags.map(tag => \`<span style="background: rgba(139, 92, 246, 0.2); color: #a78bfa; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.8rem;">\${escapeHtml(tag)}</span>\`).join('')}
+                  \${memory.tags.map(tag => \`<span style="background: rgba(226, 169, 59, 0.15); color: #E2A93B; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.8rem;">\${escapeHtml(tag)}</span>\`).join('')}
                 </div>
               </div>
             \` : ''}
@@ -7225,7 +7819,6 @@ function getDashboardHTML(): string {
     });
     
     // Overview data will be loaded after feature flags are loaded (see loadFeatureFlags above)
-    checkAntigravityAvailable();
 
     // Refresh servers every 30 seconds
     setInterval(loadData, 30000);
