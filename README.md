@@ -2130,54 +2130,6 @@ npm run lint
 npm run build
 ```
 
-### LISA - Autonomous Iteration Engine
-
-LISA (**L**ogical **I**terative **S**ystem for **A**utomation) is an intelligent agent wrapper that combines Empirica (epistemic tracking), Cipher (persistent memory), and your agent CLI for automated iterative fixing.
-
-**Quick Start:**
-```bash
-npm run lisa -- "Fix failing tests" --verify "npm test" --max 5
-```
-
-LISA will:
-1. Check Cipher memory for similar past failures
-2. Initialize Empirica epistemic session
-3. Call your agent CLI (auto-detected: `claude`, `aider`, `cursor-cli`)
-4. Run verification command
-5. If failed: capture error output, log to Empirica, retry with different approach
-6. Repeat until success or max iterations reached
-
-**Key Features:**
-- 🧠 **Empirica Integration** - Tracks epistemic state, logs mistakes and learnings
-- 📚 **Cipher Memory** - Learns from past attempts across IDE sessions
-- 🔍 **Error Context** - Passes actual error output to next iteration
-- 🤖 **Auto CLI Detection** - Works with Claude Code, Aider, Cursor CLI
-- 🏥 **Health Checks** - Validates Gateway, gracefully degrades if unavailable
-- 🧹 **Cleanup Handlers** - Proper session cleanup on Ctrl+C
-
-**Examples:**
-```bash
-# Fix build errors
-npm run lisa -- "Fix TypeScript errors" --verify "npm run build" --max 5
-
-# UI beautification
-npm run lisa -- "Make dashboard professional" --verify "npm run build" --max 10
-
-# Performance optimization
-npm run lisa -- "Optimize DB queries" --verify "npm run benchmark" --max 8
-```
-
-**Testing:**
-```bash
-# Unit tests
-./scripts/test-lisa.sh
-
-# Integration tests
-./scripts/test-lisa-integration.sh
-```
-
-📖 **Full Documentation**: [scripts/LISA.md](scripts/LISA.md)
-
 ## License
 
 MIT

@@ -174,20 +174,6 @@ After 3 failed attempts:
 | Cargo | `cargo test` | `cargo test test_name` | `cargo watch -x test` |
 | Playwright | `npx playwright test` | `npx playwright test -g "name"` | N/A |
 
-## Integration with LISA
-
-For automated iteration, this skill pairs with LISA:
-```bash
-# LISA automates the loop with verification
-npm run lisa -- "Fix [bug description]" --verify "npm test" --max 5
-```
-
-LISA will:
-1. Attempt the fix
-2. Run `--verify` command
-3. If fail: capture error, try different approach
-4. Loop until pass or max iterations
-
 ## Verification Checklist
 - [ ] Failing test exists that reproduces the bug (test fails before fix)
 - [ ] Root cause diagnosed with specific hypothesis and evidence

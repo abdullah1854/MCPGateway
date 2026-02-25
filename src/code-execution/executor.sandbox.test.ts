@@ -75,10 +75,10 @@ async function main(): Promise<void> {
     if (!result.error?.includes('timed out')) throw new Error(`Unexpected error: ${result.error}`);
   });
 
-  // 5. Async/Await Support
+  // 5. Async/Await Support (no setTimeout - timers are blocked in sandbox)
   await runTest('supports async/await', async () => {
     const result = await executor.execute(`
-      await new Promise(resolve => setTimeout(resolve, 50));
+      await Promise.resolve();
       console.log('done');
     `);
     if (result.output[0] !== 'done') throw new Error('Async execution failed');

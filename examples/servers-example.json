@@ -9,7 +9,7 @@
       "transport": {
         "type": "stdio",
         "command": "npx",
-        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/Users/me/projects"]
+        "args": ["-y", "@modelcontextprotocol/server-filesystem", "/path/to/your/projects"]
       },
       "toolPrefix": "fs",
       "timeout": 30000,

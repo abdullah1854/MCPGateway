@@ -406,19 +406,15 @@ export class CodeExecutor {
       encodeURIComponent: createSafeWrapper((component: string) => encodeURIComponent(component)),
       decodeURIComponent: createSafeWrapper((component: string) => decodeURIComponent(component)),
 
-      // Timer functions - wrapped safely (still subject to overall execution timeout)
-      setTimeout: createSafeWrapper((callback: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
-        return setTimeout(callback, ms, ...args);
-      }),
-      setInterval: createSafeWrapper((callback: (...args: unknown[]) => void, ms?: number, ...args: unknown[]) => {
-        return setInterval(callback, ms, ...args);
-      }),
-      setImmediate: createSafeWrapper((callback: (...args: unknown[]) => void, ...args: unknown[]) => {
-        return setImmediate(callback, ...args);
-      }),
-      clearTimeout: createSafeWrapper((id: ReturnType<typeof setTimeout>) => clearTimeout(id)),
-      clearInterval: createSafeWrapper((id: ReturnType<typeof setInterval>) => clearInterval(id)),
-      clearImmediate: createSafeWrapper((id: ReturnType<typeof setImmediate>) => clearImmediate(id)),
+      // Timer functions - BLOCKED: Scheduled callbacks can execute after execution timeout
+      // expires, causing resource exhaustion, memory leaks, or timing side-channel attacks.
+      // Sandbox execution must complete within the defined timeout window.
+      setTimeout: undefined,
+      setInterval: undefined,
+      setImmediate: undefined,
+      clearTimeout: undefined,
+      clearInterval: undefined,
+      clearImmediate: undefined,
 
       // Explicitly block dangerous globals
       Function: undefined,

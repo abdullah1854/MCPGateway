@@ -131,35 +131,6 @@ When the user's message contains any trigger keyword below, **immediately read**
 |-------|----------|-------------|
 | `doc-coauthoring` | "write document", "draft proposal", "draft spec", "co-author", "help me write", "RFC", "ADR", "design doc", "technical spec" | Collaborative document writing |
 
-### LISA - Autonomous Iteration Engine
-
-**CRITICAL**: When user mentions LISA, **ALWAYS** use the LISA script directly. Do NOT load a skill file.
-
-| Trigger Keywords | Action | Description |
-|------------------|--------|-------------|
-| "LISA", "run LISA", "use LISA", "invoke LISA", "start LISA", "lisa", "fix with lisa", "iterate", "auto-fix", "retry until fixed" | **Execute**: `npm run lisa -- "<task>" --verify "<cmd>" --max <N>` | Autonomous iteration engine with Empirica + Cipher integration |
-
-**When to Use LISA:**
-- User explicitly says "LISA", "use LISA", "run LISA"
-- User wants automated retry/iteration until tests pass
-- User wants to fix something iteratively with verification
-
-**LISA Invocation Template:**
-```bash
-npm run lisa -- "Fix [problem]" --verify "[test command]" --max [iterations]
-```
-
-**Examples:**
-- User: "Use LISA to fix the tests" → `npm run lisa -- "Fix failing tests" --verify "npm test" --max 5`
-- User: "Run LISA on the build errors" → `npm run lisa -- "Fix build errors" --verify "npm run build" --max 5`
-- User: "LISA iterate until it works" → `npm run lisa -- "Fix the bug" --verify "npm test" --max 10`
-
-**Important:**
-- LISA is a **script**, not a skill - execute it via npm, don't read a skill file
-- Always include `--verify` for automated checking
-- Default `--max` is 5, increase if needed
-- LISA integrates with Empirica (epistemic tracking) and Cipher (memory) automatically
-
 ### AI Delegation Workflow (MANDATORY)
 
 **CRITICAL**: Use a team-of-agents pass for direction, then apply one orchestrator-owned minimal-risk patch.

@@ -63,8 +63,17 @@ workspace/
 BrainStorm/
 SKILL-REDUNDANCY-REPORT.md
 
-# Personal automation scripts (contain local paths/server details)
-scripts/
+# Personal automation scripts (not for public repo)
+scripts/check-clawdbot-inbox.sh
+scripts/sync-cipher-to-clawdbot.sh
+scripts/sync-to-clawdbot.sh
+scripts/claude-heartbeat.sh
+scripts/LISA.md
+scripts/lisa.ts
+scripts/cipher-helper.ts
+scripts/diagnose-cipher.sh
+scripts/test-lisa.sh
+scripts/test-lisa-integration.sh
 
 # Enterprise-specific skills (contain internal infrastructure details)
 .agents/skills/enterprise-data-platform/
@@ -72,3 +81,5 @@ scripts/
 .agents/skills/database-query-guide/
 .agents/skills/ax-dynamics-helper/
 .agents/skills/fabric-helper/
+.agents/skills/gbcr-commission/
+.agents/skills/maximo-helper/

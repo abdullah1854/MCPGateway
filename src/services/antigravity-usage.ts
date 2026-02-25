@@ -115,7 +115,7 @@ async function findLanguageServers(): Promise<LanguageServerInfo[]> {
     // Parse lsof output to map PID -> ports
     const pidPorts: Map<number, number[]> = new Map();
     for (const lsofLine of lsofOutput.split('\n').filter(Boolean)) {
-      // Format: language_ 75373 abdullah   21u  IPv4  0x585b... TCP 127.0.0.1:64446 (LISTEN)
+      // Format: language_ 75373 user   21u  IPv4  0x585b... TCP 127.0.0.1:64446 (LISTEN)
       const lsofParts = lsofLine.trim().split(/\s+/);
       const lsofPid = parseInt(lsofParts[1], 10);
       const portMatch = lsofLine.match(/:(\d+)\s+\(LISTEN\)/);
