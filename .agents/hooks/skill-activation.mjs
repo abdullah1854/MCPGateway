@@ -9,7 +9,6 @@
  */
 
 import fs from 'fs';
-import path from 'path';
 
 // Skill definitions with trigger keywords/patterns
 const SKILLS = [
@@ -52,6 +51,27 @@ const SKILLS = [
     ],
     description: 'Systematic debugging protocol'
   },
+  {
+    name: 'test-driven-fix',
+    triggers: [
+      /write\s*a\s*test\s*first/i,
+      /test[\s-]*driven\s*fix/i,
+      /tdd\s*fix/i,
+      /reproduce\s*with\s*test/i,
+      /make\s*it\s*pass/i,
+    ],
+    description: 'Test-first debugging loop'
+  },
+  {
+    name: 'sql-analyzer',
+    triggers: [
+      /sql\s*(anti[\s-]*pattern|optimi[sz])/i,
+      /slow\s*query/i,
+      /query\s*performance/i,
+      /explain\s*plan/i,
+    ],
+    description: 'SQL query anti-patterns and optimization'
+  },
 
   // === GIT & VERSION CONTROL ===
   {
@@ -65,56 +85,24 @@ const SKILLS = [
     ],
     description: 'Git operations and conventional commits'
   },
-
-  // === DOCUMENT SKILLS ===
   {
-    name: 'docx',
+    name: 'daily-standup',
     triggers: [
-      /word\s*doc(ument)?/i,
-      /\.docx/i,
-      /create\s*(a\s*)?document/i,
-      /edit\s*(the\s*)?document/i,
-      /tracked\s*changes/i,
-      /redline/i,
+      /standup/i,
+      /daily\s*report/i,
+      /what\s*did\s*(i|we)\s*(do|work)/i,
+      /yesterday['']?s?\s*work/i,
     ],
-    description: 'Create, edit, and analyze Word documents'
+    description: 'Git-based standup reports'
   },
   {
-    name: 'pdf',
+    name: 'pr-summary',
     triggers: [
-      /\bpdf\b/i,
-      /merge\s*pdf/i,
-      /split\s*pdf/i,
-      /extract\s*(text\s*)?(from\s*)?pdf/i,
-      /create\s*(a\s*)?pdf/i,
-      /pdf\s*form/i,
+      /pr\s*summary/i,
+      /pull\s*request\s*(summary|description)/i,
+      /describe\s*(this\s*)?pr/i,
     ],
-    description: 'PDF creation, merging, splitting, and extraction'
-  },
-  {
-    name: 'pptx',
-    triggers: [
-      /powerpoint/i,
-      /\.pptx/i,
-      /presentation/i,
-      /\bslides?\b/i,
-      /\bdeck\b/i,
-      /create\s*(a\s*)?presentation/i,
-    ],
-    description: 'Create and edit PowerPoint presentations'
-  },
-  {
-    name: 'xlsx',
-    triggers: [
-      /\bexcel\b/i,
-      /spreadsheet/i,
-      /\.xlsx/i,
-      /financial\s*model/i,
-      /\bformulas?\b/i,
-      /pivot\s*table/i,
-      /workbook/i,
-    ],
-    description: 'Excel spreadsheet creation and analysis'
+    description: 'Pull request descriptions'
   },
 
   // === FRONTEND & UI ===
@@ -133,83 +121,6 @@ const SKILLS = [
       /shadcn/i,
     ],
     description: 'Production-grade frontend with distinctive design'
-  },
-  {
-    name: 'web-artifacts',
-    triggers: [
-      /web\s*artifact/i,
-      /single[\s-]?file\s*(app|html)/i,
-      /bundle\s*(as\s*)?html/i,
-      /standalone\s*app/i,
-      /interactive\s*demo/i,
-      /portable\s*(web\s*)?app/i,
-    ],
-    description: 'Self-contained HTML web applications'
-  },
-  {
-    name: 'algorithmic-art',
-    triggers: [
-      /generative\s*art/i,
-      /algorithmic\s*art/i,
-      /p5\.?js/i,
-      /creative\s*coding/i,
-      /procedural\s*(generation|art)/i,
-      /make\s*art\s*with\s*code/i,
-    ],
-    description: 'Generative art with p5.js'
-  },
-
-  // === TESTING ===
-  {
-    name: 'webapp-testing',
-    triggers: [
-      /playwright/i,
-      /e2e\s*test/i,
-      /end[\s-]?to[\s-]?end/i,
-      /browser\s*automation/i,
-      /ui\s*test/i,
-      /test\s*(the\s*)?(webapp|frontend|ui)/i,
-    ],
-    description: 'Playwright browser automation and testing'
-  },
-
-  // === DEVELOPMENT TOOLS ===
-  {
-    name: 'mcp-builder',
-    triggers: [
-      /mcp\s*server/i,
-      /mcp\s*tool/i,
-      /build\s*(an?\s*)?mcp/i,
-      /model\s*context\s*protocol/i,
-      /extend\s*claude/i,
-      /add\s*tools?\s*to\s*claude/i,
-    ],
-    description: 'Build MCP servers for Claude'
-  },
-  {
-    name: 'skill-creator',
-    triggers: [
-      /create\s*(a\s*)?skill/i,
-      /new\s*skill/i,
-      /build\s*(a\s*)?skill/i,
-      /skill\s*template/i,
-      /skill\.md/i,
-      /how\s*to\s*make\s*a\s*skill/i,
-    ],
-    description: 'Create new Claude Code skills'
-  },
-  {
-    name: 'api-integration',
-    triggers: [
-      /integrate\s*(with\s*)?(api|service)/i,
-      /api\s*(call|integration)/i,
-      /webhook/i,
-      /\brest\b/i,
-      /graphql/i,
-      /stripe/i,
-      /fetch\s*from/i,
-    ],
-    description: 'External API integration patterns'
   },
 
   // === DOCUMENTATION ===
@@ -243,6 +154,32 @@ const SKILLS = [
       /hosting/i,
     ],
     description: 'Infrastructure and deployment'
+  },
+  {
+    name: 'hostinger-deploy',
+    triggers: [
+      /hostinger/i,
+      /hpanel/i,
+      /opcache/i,
+    ],
+    description: 'Hostinger-specific deployment'
+  },
+  {
+    name: 'seo-recovery',
+    triggers: [
+      /\bseo\b/i,
+      /traffic\s*drop/i,
+      /indexing/i,
+      /canonical/i,
+      /hreflang/i,
+      /sitemap/i,
+      /search\s*console/i,
+      /\bgsc\b/i,
+      /crawl\s*errors/i,
+      /deindexed/i,
+      /organic\s*traffic/i,
+    ],
+    description: 'SEO diagnostic protocol'
   },
 
   // === SESSION MANAGEMENT ===
@@ -319,6 +256,22 @@ const SKILLS = [
     ],
     description: 'GBCR commission debugging'
   },
+  {
+    name: 'debug-rental-commission',
+    triggers: [
+      /rental\s*commission/i,
+      /commission\s*pipeline/i,
+    ],
+    description: 'Rental commission pipeline debugging'
+  },
+  {
+    name: 'office-skill',
+    triggers: [
+      /crm\s*pipeline/i,
+      /maximo\s*sync/i,
+    ],
+    description: 'CRM pipeline and Maximo sync operations'
+  },
 ];
 
 // Get user prompt from stdin (Claude Code passes it via environment or stdin)
@@ -387,7 +340,7 @@ The following skills are relevant to this request. Load them for best results:
 
 ${skillList}
 
-To load a skill, read the SKILL.md file from .claude/skills/{skill-name}/SKILL.md
+To load a skill, read the SKILL.md file from .agents/skills/{skill-name}/SKILL.md
 </skill-activation>
 `);
 }

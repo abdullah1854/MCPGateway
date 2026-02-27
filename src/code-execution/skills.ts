@@ -302,11 +302,8 @@ export class SkillsManager {
     this.executor = executor;
     this.workspaceSkillsPath = workspace.getSkillsPath();
 
-    // Include default external skills path if not provided
-    const defaultMSkillsPath = join(process.cwd(), 'external-skills');
-    this.externalSkillsPaths = externalPaths.length > 0
-      ? externalPaths
-      : (existsSync(defaultMSkillsPath) ? [defaultMSkillsPath] : []);
+    // Only include external paths that actually exist
+    this.externalSkillsPaths = externalPaths.filter(p => existsSync(p));
 
     // Initial cache population
     this.refreshCache();
@@ -402,6 +399,24 @@ export class SkillsManager {
     const codePath = join(skillDir, 'index.ts');
 
     if (!existsSync(metadataPath)) {
+      // Check for protocol-only skill (SKILL.md without skill.json)
+      const skillMdPath = join(skillDir, 'SKILL.md');
+      if (existsSync(skillMdPath)) {
+        const dirName = skillDir.split(sep).pop() || '';
+        return {
+          name: dirName,
+          description: 'Protocol skill — load via AI agent, not executable via gateway.',
+          version: '1.0.0',
+          tags: ['protocol-only'],
+          category: this.detectCategory([], dirName),
+          inputs: [],
+          code: '',
+          source,
+          sourcePath: skillDir,
+          createdAt: new Date(),
+          updatedAt: new Date(),
+        };
+      }
       return null;
     }
 
@@ -716,6 +731,17 @@ export class SkillsManager {
         success: false,
         output: [],
         error: `Skill not found: ${name}`,
+        executionTime: 0,
+      };
+    }
+
+    // Guard: protocol-only skills cannot be executed
+    if (!skill.code) {
+      return {
+        skillName: name,
+        success: false,
+        output: [],
+        error: `'${name}' is a protocol-only skill (SKILL.md). Read .agents/skills/${name}/SKILL.md instead.`,
         executionTime: 0,
       };
     }

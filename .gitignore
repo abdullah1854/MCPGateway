@@ -83,3 +83,13 @@ scripts/test-lisa-integration.sh
 .agents/skills/fabric-helper/
 .agents/skills/gbcr-commission/
 .agents/skills/maximo-helper/
+.agents/skills/debug-rental-commission/
+.agents/skills/office-skill/
+.agents/skills/cipher_ask_cipher/
+.agents/skills/cipher-memory/
+.agents/skills/simplequran-api-route/
+.agents/skills/simplequran-build-audit/
+.agents/skills/simplequran-deploy/
+.agents/skills/simplequran-new-page/
+.agents/skills/simplequran-seo-validate/
+.agents/skills/simplequran-supabase-migrate/

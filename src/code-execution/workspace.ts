@@ -37,10 +37,10 @@ export class WorkspaceManager {
   private sessionsPath: string;
   private skillsPath: string;
 
-  constructor(basePath?: string) {
+  constructor(basePath?: string, skillsBasePath?: string) {
     this.workspacePath = basePath ?? join(__dirname, '../../workspace');
     this.sessionsPath = join(this.workspacePath, 'sessions');
-    this.skillsPath = join(this.workspacePath, 'skills');
+    this.skillsPath = skillsBasePath ?? join(__dirname, '../../.agents/skills');
 
     this.ensureDirectories();
   }

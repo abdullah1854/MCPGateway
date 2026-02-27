@@ -79,57 +79,11 @@ cipher_ask_cipher({
 
 ---
 
-## Skill Auto-Activation (ALL IDEs)
+## Skill Auto-Activation
 
-> **SCAN THIS SECTION FIRST** before responding to any user request.
+Skills auto-activate via hook in Claude Code. For other IDEs, see `.agents/AGENTS.md`.
 
-When the user's message contains any trigger keyword below, **immediately read** the corresponding skill file before responding:
-
-### Thinking & Analysis
-
-| Skill | Triggers | Description |
-|-------|----------|-------------|
-| `deep-thinking` | "think harder", "ultrathink", "analyze thoroughly", "complex problem", "architecture decision", "trade-off", "design system" | Extended reasoning for complex problems |
-
-### Code Quality & Debugging
-
-| Skill | Triggers | Description |
-|-------|----------|-------------|
-| `code-review` | "review code", "review PR", "security audit", "find bugs", "code quality", "check for vulnerabilities" | Security, performance, maintainability review |
-| `debugging` | "debug", "fix bug", "not working", "undefined", "null", "crash", "fails", "broken", "error message", "stack trace" | Hardened debugging protocol with STOP-THINK-ACT, evidence-first methodology, anti-exploration-spiral rules, and parallel agent investigation patterns. Encoded from 169 sessions of real friction data |
-| `test-driven-fix` | "write a test first", "test-driven fix", "TDD fix", "reproduce with test", "make it pass", "fix with test" | Test-first debugging: reproduce bug with failing test, then iterate until passing |
-
-### Git & Version Control
-
-| Skill | Triggers | Description |
-|-------|----------|-------------|
-| `git-workflow` | "commit", "push", "merge", "rebase", "create PR", "pull request", "branch", "resolve conflict" | Git operations and conventional commits |
-
-### SEO & Deployment
-
-| Skill | Triggers | Description |
-|-------|----------|-------------|
-| `seo-recovery` | "SEO", "traffic drop", "indexing", "canonical", "hreflang", "sitemap", "search console", "GSC", "crawl errors", "deindexed", "organic traffic" | SEO diagnostic protocol with GSC MCP integration, common issue playbooks, and Hostinger deployment awareness |
-| `hostinger-deploy` | "deploy to hostinger", "hostinger", "redeploy", "publish website", "hPanel", "OPcache", "site not updating" | Hostinger-specific deployment with OPcache/CDN handling |
-
-### Frontend & UI
-
-| Skill | Triggers | Description |
-|-------|----------|-------------|
-| `frontend-build` | "build UI", "build component", "landing page", "dashboard", "frontend", "tailwind", "responsive", "design", "react", "next.js", "shadcn" | Production-grade frontend with distinctive design |
-
-### Infrastructure & Session
-
-| Skill | Triggers | Description |
-|-------|----------|-------------|
-| `infra-deploy` | "deploy", "VPS", "docker", "coolify", "SSH", "nginx", "production", "server setup", "hosting" | Infrastructure and deployment |
-| `session-handoff` | "save session", "handoff", "continue later", "switching IDE", "end session", "summarize session" | Context preservation across sessions |
-
-### Documentation
-
-| Skill | Triggers | Description |
-|-------|----------|-------------|
-| `doc-coauthoring` | "write document", "draft proposal", "draft spec", "co-author", "help me write", "RFC", "ADR", "design doc", "technical spec" | Collaborative document writing |
+Skills location: `.agents/skills/{skill-name}/SKILL.md`
 
 ### AI Delegation Workflow (MANDATORY)
 

@@ -1,0 +1,43 @@
+{
+  "name": "git-workflow",
+  "description": "Generates conventional commit messages by analyzing staged changes.",
+  "version": "1.0.0",
+  "category": "git-workflow",
+  "inputs": [
+    {
+      "name": "type",
+      "type": "string",
+      "description": "Commit type: feat, fix, refactor, docs, test, chore",
+      "required": false
+    },
+    {
+      "name": "scope",
+      "type": "string",
+      "description": "Scope of change",
+      "required": false
+    },
+    {
+      "name": "description",
+      "type": "string",
+      "description": "Brief description of change",
+      "required": true
+    },
+    {
+      "name": "breaking",
+      "type": "boolean",
+      "description": "Is this a breaking change?",
+      "required": false
+    }
+  ],
+  "tags": [
+    "git",
+    "commit",
+    "conventional-commits"
+  ],
+  "mcpDependencies": [],
+  "antiHallucination": [],
+  "verificationChecklist": [],
+  "source": "workspace",
+  "createdAt": "2025-12-22T02:36:14.393Z",
+  "updatedAt": "2025-12-22T02:36:14.393Z"
+}

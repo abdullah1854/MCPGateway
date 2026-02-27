@@ -1,0 +1,43 @@
+{
+  "name": "frontend-build",
+  "description": "Distinctive, production-grade frontend interfaces with high design quality. Avoids generic AI aesthetics. Use when: building UI components, creating landing pages, implementing responsive designs.",
+  "version": "1.0.0",
+  "category": "code-quality",
+  "inputs": [
+    {
+      "name": "component",
+      "type": "string",
+      "description": "Component type: landing, dashboard, form, card, navigation",
+      "required": true
+    },
+    {
+      "name": "style",
+      "type": "string",
+      "description": "Style: minimal, bold, glassmorphism, brutalist, corporate",
+      "required": false
+    },
+    {
+      "name": "framework",
+      "type": "string",
+      "description": "Framework: react, nextjs, vue, svelte",
+      "required": false
+    }
+  ],
+  "tags": [
+    "frontend",
+    "design",
+    "ui",
+    "ux",
+    "tailwind",
+    "components",
+    "responsive"
+  ],
+  "mcpDependencies": [],
+  "chainOfThought": "1. Understand component requirements. 2. Select distinctive design pattern (avoid generic). 3. Choose color palette with intention. 4. Implement with accessibility in mind. 5. Add micro-interactions. 6. Ensure responsive behavior.",
+  "antiHallucination": [],
+  "verificationChecklist": [],
+  "source": "workspace",
+  "sourcePath": ".agents/skills/frontend-build",
+  "createdAt": "2025-12-22T16:32:50.145Z",
+  "updatedAt": "2025-12-22T16:32:50.145Z"
+}

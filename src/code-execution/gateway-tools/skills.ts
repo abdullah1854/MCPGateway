@@ -239,7 +239,7 @@ export function getSkillsTools(config: GatewayToolsConfig, liteMode: boolean): G
 
         tools.push({
             name: `${prefix}_import_skill`,
-            description: 'Import an external skill from external-skills folder into the workspace for customization.',
+            description: 'Import a skill from an external directory into .agents/skills/. No-op if no external directories configured.',
             inputSchema: {
                 type: 'object',
                 properties: {
@@ -258,7 +258,7 @@ export function getSkillsTools(config: GatewayToolsConfig, liteMode: boolean): G
 
         tools.push({
             name: `${prefix}_sync_external_skills`,
-            description: 'Sync all external skills from external-skills folder to workspace.',
+            description: 'Sync skills from external directories into .agents/skills/. No-op if no external directories configured.',
             inputSchema: {
                 type: 'object',
                 properties: {},
@@ -444,12 +444,12 @@ export async function handleSkillsToolCall(
 
     if (name === `${prefix}_import_skill`) {
         const skillName = params.name as string;
-        const skill = await skillsManager.importSkill(skillName);
+        const skill = skillsManager.importSkill(skillName);
         return { success: true, skill };
     }
 
     if (name === `${prefix}_sync_external_skills`) {
-        const results = await skillsManager.syncExternalSkills();
+        const results = skillsManager.syncExternalSkills();
         return { success: true, results };
     }
 

@@ -1,0 +1,37 @@
+{
+  "name": "daily-standup",
+  "description": "Generates daily standup reports from accomplishments, plans, and blockers.",
+  "version": "1.0.0",
+  "category": "productivity",
+  "inputs": [
+    {
+      "name": "accomplishments",
+      "type": "array",
+      "description": "Yesterday's accomplishments",
+      "required": true
+    },
+    {
+      "name": "planned",
+      "type": "array",
+      "description": "Today's plan",
+      "required": true
+    },
+    {
+      "name": "blockers",
+      "type": "array",
+      "description": "Current blockers",
+      "required": false
+    }
+  ],
+  "tags": [
+    "standup",
+    "agile",
+    "productivity"
+  ],
+  "mcpDependencies": [],
+  "antiHallucination": [],
+  "verificationChecklist": [],
+  "source": "workspace",
+  "createdAt": "2025-12-22T02:36:14.617Z",
+  "updatedAt": "2025-12-22T02:36:14.617Z"
+}

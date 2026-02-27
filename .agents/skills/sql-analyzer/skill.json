@@ -1,0 +1,32 @@
+{
+  "name": "sql-analyzer",
+  "description": "Analyzes SQL queries for anti-patterns, performance issues, and suggests optimizations.",
+  "version": "1.0.0",
+  "category": "database",
+  "inputs": [
+    {
+      "name": "query",
+      "type": "string",
+      "description": "SQL query to analyze",
+      "required": true
+    },
+    {
+      "name": "dialect",
+      "type": "string",
+      "description": "SQL dialect: mssql, postgres, mysql",
+      "required": false
+    }
+  ],
+  "tags": [
+    "sql",
+    "database",
+    "performance",
+    "optimization"
+  ],
+  "mcpDependencies": [],
+  "antiHallucination": [],
+  "verificationChecklist": [],
+  "source": "workspace",
+  "createdAt": "2025-12-22T02:35:19.208Z",
+  "updatedAt": "2025-12-22T02:35:19.208Z"
+}

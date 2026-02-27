@@ -1,0 +1,43 @@
+{
+  "name": "pr-summary",
+  "description": "Creates comprehensive Pull Request summaries with changes, test plan, and related issues.",
+  "version": "1.0.0",
+  "category": "git-workflow",
+  "inputs": [
+    {
+      "name": "title",
+      "type": "string",
+      "description": "PR title",
+      "required": true
+    },
+    {
+      "name": "changes",
+      "type": "array",
+      "description": "List of changes made",
+      "required": true
+    },
+    {
+      "name": "testPlan",
+      "type": "array",
+      "description": "Test plan items",
+      "required": false
+    },
+    {
+      "name": "issues",
+      "type": "array",
+      "description": "Related issue numbers",
+      "required": false
+    }
+  ],
+  "tags": [
+    "git",
+    "pull-request",
+    "github"
+  ],
+  "mcpDependencies": [],
+  "antiHallucination": [],
+  "verificationChecklist": [],
+  "source": "workspace",
+  "createdAt": "2025-12-22T02:36:14.492Z",
+  "updatedAt": "2025-12-22T02:36:14.492Z"
+}
