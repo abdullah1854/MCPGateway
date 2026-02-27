@@ -422,18 +422,18 @@ This means:
 
 ### Skills Auto-Activation
 
-The `.agents/AGENTS.md` includes trigger keywords that automatically activate relevant skills:
+Skills in `.agents/skills/` can auto-activate when your AI agent detects relevant keywords in your prompt. Setup varies by IDE — see **[Setting Up Skill Auto-Activation](#setting-up-skill-auto-activation)** in the Skills System section for full instructions.
 
-| Trigger | Skill Activated |
-|---------|-----------------|
-| "review code", "security audit" | `code-review` |
-| "debug", "fix bug", "not working" | `debugging` |
-| "commit", "push", "create PR" | `git-workflow` |
-| "build UI", "dashboard", "React" | `frontend-build` |
-| "deploy", "docker", "production" | `infra-deploy` |
+Quick overview of built-in triggers:
 
-**Claude Code**: Skills auto-load via the `skill-activation.mjs` hook.
-**Other IDEs**: Follow the instructions in AGENTS.md to manually load skills.
+| Trigger Keywords | Skill Loaded |
+|-----------------|-------------|
+| "review code", "security audit", "find bugs" | `code-review` |
+| "debug", "fix bug", "not working", "error" | `debugging` |
+| "commit", "push", "create PR", "merge" | `git-workflow` |
+| "build UI", "dashboard", "React", "frontend" | `frontend-build` |
+| "deploy", "docker", "production", "hosting" | `infra-deploy` |
+| "SQL optimization", "slow query" | `sql-analyzer` |
 
 ### Setting Up for Your Fork
 
@@ -781,11 +781,120 @@ EOF
 
 The gateway will list it as a protocol-only skill. AI agents read the SKILL.md directly instead of executing code.
 
-#### Skills Auto-Activation (Claude Code)
+#### Setting Up Skill Auto-Activation
 
-If you're using Claude Code, the hook at `.agents/hooks/skill-activation.mjs` automatically detects trigger keywords in user prompts and suggests relevant skills. Add your own triggers by editing the `SKILLS` array in that file.
+Skills don't activate on their own — your AI agent needs to be told they exist. Choose your setup below:
 
-For other IDEs, instruct your AI agent to read `.agents/skills/{skill-name}/SKILL.md` when relevant topics come up.
+<details>
+<summary><strong>Claude Code</strong> (recommended — fully automatic)</summary>
+
+Claude Code supports [hooks](https://docs.anthropic.com/en/docs/claude-code/hooks) that run on every prompt. The repo includes a hook at `.agents/hooks/skill-activation.mjs` that detects trigger keywords and injects skill recommendations into context.
+
+**Setup:** Add this to your project's `.claude/settings.local.json` (create the file if it doesn't exist):
+
+```json
+{
+  "hooks": {
+    "UserPromptSubmit": [
+      {
+        "hooks": [
+          {
+            "type": "command",
+            "command": "node .agents/hooks/skill-activation.mjs"
+          }
+        ]
+      }
+    ]
+  }
+}
+```
+
+**How it works:**
+1. You type a prompt like _"review this code for security issues"_
+2. The hook matches "review code" → `code-review` skill
+3. Claude receives: _"Load `.agents/skills/code-review/SKILL.md` for best results"_
+4. Claude reads the skill file and follows its protocol
+
+**Customize triggers:** Edit the `SKILLS` array in `.agents/hooks/skill-activation.mjs` to add your own keyword → skill mappings.
+
+</details>
+
+<details>
+<summary><strong>Cursor</strong></summary>
+
+Add this block to your `.cursorrules` file (or `.cursor/rules/skills.mdc`):
+
+```markdown
+## Skills
+
+This project has reusable AI skills at `.agents/skills/`. When the user's request
+matches a skill, read its SKILL.md BEFORE responding.
+
+| User says | Read this skill |
+|-----------|----------------|
+| "review code", "security audit", "find bugs" | `.agents/skills/code-review/SKILL.md` |
+| "debug", "fix bug", "not working", "error" | `.agents/skills/debugging/SKILL.md` |
+| "commit", "push", "create PR", "merge" | `.agents/skills/git-workflow/SKILL.md` |
+| "build UI", "dashboard", "React", "frontend" | `.agents/skills/frontend-build/SKILL.md` |
+| "deploy", "docker", "production", "hosting" | `.agents/skills/infra-deploy/SKILL.md` |
+| "SQL optimization", "slow query" | `.agents/skills/sql-analyzer/SKILL.md` |
+
+To see all available skills: `ls .agents/skills/`
+```
+
+</details>
+
+<details>
+<summary><strong>Windsurf</strong></summary>
+
+Add the same block as Cursor to your `.windsurfrules` file.
+
+</details>
+
+<details>
+<summary><strong>VS Code Copilot / Codex / Other</strong></summary>
+
+Add this to whatever file your IDE reads for AI instructions (e.g., `AGENTS.md`, `.github/copilot-instructions.md`):
+
+```markdown
+## Skills
+
+This project has reusable AI skills at `.agents/skills/`. Each skill directory
+contains a SKILL.md with instructions the AI should follow.
+
+Before responding to a user request, check if any skill matches:
+1. List skills: `ls .agents/skills/`
+2. If a skill name matches the task, read `.agents/skills/{name}/SKILL.md`
+3. Follow the skill's instructions in your response
+
+Skills with a `skill.json` + `index.ts` can also be executed programmatically
+via the MCP Gateway: `gateway_execute_skill({ name: "skill-name", inputs: {...} })`
+```
+
+</details>
+
+<details>
+<summary><strong>Any IDE — universal prompt snippet</strong></summary>
+
+If none of the above apply, paste this into your AI system prompt or project instructions:
+
+```
+You have access to a skills library at .agents/skills/. Each skill is a directory
+containing a SKILL.md with step-by-step instructions for specific tasks.
+
+IMPORTANT: Before starting any task, check if a matching skill exists:
+- Code review → .agents/skills/code-review/SKILL.md
+- Debugging → .agents/skills/debugging/SKILL.md
+- Git workflow → .agents/skills/git-workflow/SKILL.md
+- Frontend → .agents/skills/frontend-build/SKILL.md
+- Deployment → .agents/skills/infra-deploy/SKILL.md
+- SQL analysis → .agents/skills/sql-analyzer/SKILL.md
+
+If a skill matches, read its SKILL.md and follow the protocol before responding.
+For the full list: ls .agents/skills/
+```
+
+</details>
 
 ---
 
