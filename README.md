@@ -395,9 +395,9 @@ MCP Gateway uses a centralized `.agents/` directory as the single source of trut
 ├── AGENTS.md              # Unified project rules (symlinked to all IDEs)
 ├── hooks/
 │   └── skill-activation.mjs  # Auto-activates skills based on prompt keywords
-├── skills/                # 21 Claude Code skills (SKILL.md format)
-│   ├── code-review/
-│   ├── debugging/
+├── skills/                # Single source of truth for all skills
+│   ├── code-review/       # Executable: skill.json + index.ts + SKILL.md
+│   ├── debugging/         # Protocol-only: SKILL.md only (loaded by AI agent)
 │   ├── git-workflow/
 │   └── ...
 └── rules/                 # Additional rule fragments
@@ -639,19 +639,29 @@ The Skills system allows you to save and reuse code patterns for zero-shot execu
 ENABLE_SKILLS=1
 ```
 
-#### Storage Locations
+#### Storage Location
 
-Skills are stored in two directories:
-- `workspace/skills/` - User-created skills (editable)
-- `external-skills/` - Shared/imported skills (read-only by default)
+All skills live in a single directory: **`.agents/skills/`**
 
-Each skill is a directory containing:
+Skills come in two flavors:
+
+**Executable skills** (have `skill.json` + `index.ts`) — can be run via `gateway_execute_skill`:
 ```
-my-skill/
+code-review/
 ├── skill.json    # Metadata (name, description, inputs, tags)
 ├── index.ts      # Executable TypeScript code
-└── SKILL.md      # Auto-generated documentation
+├── SKILL.md      # Human-readable protocol/instructions
+├── scripts/      # Optional helper scripts
+└── references/   # Optional reference docs
 ```
+
+**Protocol-only skills** (have `SKILL.md` only) — loaded by the AI agent, not executable via gateway:
+```
+debugging/
+└── SKILL.md      # Protocol/instructions the AI follows
+```
+
+Protocol-only skills appear in `gateway_list_skills` but return a helpful error if you try to execute them, directing you to read the SKILL.md instead.
 
 #### Creating Skills via MCP Tools
 
@@ -714,6 +724,68 @@ When enabled, a **Skills** tab appears in the dashboard (`/dashboard`) showing:
 - Skill details and code preview
 - Execute skills directly from UI
 - Create new skills from templates
+
+#### Adding Your Own Skills
+
+You can add skills to your gateway in two ways:
+
+**1. Create executable skills** (for automation via `gateway_execute_skill`):
+
+```bash
+mkdir -p .agents/skills/my-skill
+```
+
+Create three files:
+
+`skill.json` — metadata:
+```json
+{
+  "name": "my-skill",
+  "description": "What this skill does",
+  "version": "1.0.0",
+  "category": "productivity",
+  "inputs": [
+    { "name": "target", "type": "string", "required": true, "description": "Target to process" }
+  ],
+  "tags": ["automation"]
+}
+```
+
+`index.ts` — executable code:
+```typescript
+const target = inputs?.target || 'default';
+const result = await callTool('some_backend_tool', { query: target });
+console.log(JSON.stringify(result));
+```
+
+`SKILL.md` — human-readable instructions (optional but recommended).
+
+**2. Create protocol-only skills** (for AI agent workflows):
+
+Just create a `SKILL.md` in a skill directory — no `skill.json` needed:
+
+```bash
+mkdir -p .agents/skills/my-protocol
+cat > .agents/skills/my-protocol/SKILL.md << 'EOF'
+# My Protocol
+
+## When to Use
+When the user asks to...
+
+## Steps
+1. First do X
+2. Then do Y
+3. Verify with Z
+EOF
+```
+
+The gateway will list it as a protocol-only skill. AI agents read the SKILL.md directly instead of executing code.
+
+#### Skills Auto-Activation (Claude Code)
+
+If you're using Claude Code, the hook at `.agents/hooks/skill-activation.mjs` automatically detects trigger keywords in user prompts and suggests relevant skills. Add your own triggers by editing the `SKILLS` array in that file.
+
+For other IDEs, instruct your AI agent to read `.agents/skills/{skill-name}/SKILL.md` when relevant topics come up.
 
 ---
 
