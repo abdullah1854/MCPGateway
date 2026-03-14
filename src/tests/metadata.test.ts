@@ -137,6 +137,8 @@ async function main(): Promise<void> {
     const firstSection = readme.slice(0, README_TOP_SECTION_LENGTH);
     const orderedSnippets = [
       'img.shields.io',
+      'https://lobehub.com/badge/mcp/abdullah1854-mcpgateway',
+      'https://lobehub.com/mcp/abdullah1854-mcpgateway',
       '## Quick Links',
       '## Quick Start in 3 Commands',
       '## Supported MCP Clients',
