@@ -1,11 +1,48 @@
 # MCP Gateway
 
+[![License: MIT](https://img.shields.io/badge/license-MIT-yellow.svg)](LICENSE)
+[![Node.js >=20](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
+[![TypeScript 5.5](https://img.shields.io/badge/TypeScript-5.5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
+[![MCP Transport](https://img.shields.io/badge/MCP-HTTP%20%2B%20SSE-7C3AED)](#endpoints)
+
 A universal Model Context Protocol (MCP) Gateway that aggregates multiple MCP servers and provides **result optimization** that native tool search doesn't offer. Works with all major MCP clients:
 
 - ✅ **Claude Desktop / Claude Code**
 - ✅ **Cursor**
 - ✅ **OpenAI Codex**
 - ✅ **VS Code Copilot**
+
+**Best for:** teams that want one MCP endpoint, a browser dashboard, and aggressive token savings when working across many tools.
+
+## Quick Links
+
+- [Quick start](#quick-start)
+- [Supported clients](#supported-mcp-clients)
+- [Dashboard screenshots](#screenshots)
+- [Backend configuration](#backend-server-configuration)
+- [Security modes](#security-modes)
+- [Examples](examples/)
+- [Issues & support](https://github.com/abdullah1854/MCPGateway/issues)
+
+## Quick Start in 3 Commands
+
+```bash
+npm install
+cp config/servers.example.json config/servers.json
+npm run dev
+```
+
+Then open `http://localhost:3010/dashboard`, connect your preferred client, and continue with the full [Quick Start](#quick-start) below for server configuration and production setup.
+
+## Supported MCP Clients
+
+| Client | Support | Notes |
+|--------|---------|-------|
+| Claude Desktop | ✅ | Connect through the gateway's HTTP or SSE endpoints |
+| Claude Code | ✅ | Reduces context overhead for large tool catalogs |
+| Cursor | ✅ | Use one gateway to expose hundreds of backend tools |
+| OpenAI Codex | ✅ | Works with the gateway's standard MCP endpoints |
+| VS Code Copilot | ✅ | Centralizes MCP tooling across local and remote servers |
 
 ![MCP Gateway Architecture](screenshots/MCPGateway.jpg)
 
