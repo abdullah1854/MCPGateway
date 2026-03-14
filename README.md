@@ -4,7 +4,7 @@
 [![Node.js >=20](https://img.shields.io/badge/node-%3E%3D20-339933?logo=node.js&logoColor=white)](https://nodejs.org/)
 [![TypeScript 5.5](https://img.shields.io/badge/TypeScript-5.5-3178C6?logo=typescript&logoColor=white)](https://www.typescriptlang.org/)
 [![MCP Transport](https://img.shields.io/badge/MCP-HTTP%20%2B%20SSE-7C3AED)](#endpoints)
-[<img alt="LobeHub MCP listing badge" src="https://lobehub.com/badge/mcp/abdullah1854-mcpgateway">](https://lobehub.com/mcp/abdullah1854-mcpgateway)
+[![LobeHub MCP listing badge][lobehub-mcp-badge]][lobehub-mcp-listing]
 
 A universal Model Context Protocol (MCP) Gateway that aggregates multiple MCP servers and provides **result optimization** that native tool search doesn't offer. Works with all major MCP clients:
 
@@ -14,6 +14,10 @@ A universal Model Context Protocol (MCP) Gateway that aggregates multiple MCP se
 - ✅ **VS Code Copilot**
 
 **Best for:** teams that want one MCP endpoint, a browser dashboard, and aggressive token savings when working across many tools.
+
+<!-- Update these LobeHub URLs if the repository or marketplace slug changes; src/tests/metadata.test.ts validates them. -->
+[lobehub-mcp-badge]: https://lobehub.com/badge/mcp/abdullah1854-mcpgateway
+[lobehub-mcp-listing]: https://lobehub.com/mcp/abdullah1854-mcpgateway
 
 ## Quick Links
 

@@ -11,8 +11,16 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
-// Covers the README opening area where badges, quick links, and install guidance should remain visible.
+// Roughly the first 2500 characters of the README, enough to cover badges, quick links, and the short install path.
 const README_TOP_SECTION_LENGTH = 2500;
+
+type PackageJsonMetadata = {
+  homepage?: string;
+  repository?: { url?: string } | string;
+  bugs?: { url?: string };
+  author?: string | { name?: string; url?: string };
+  keywords?: string[];
+};
 
 async function findRepoRoot(startDir: string): Promise<string> {
   let candidate = startDir;
@@ -62,6 +70,10 @@ function normalizeRepositoryUrl(url: string | undefined): string {
   return normalized;
 }
 
+function buildLobeHubListingSlug(repositorySlug: string): string {
+  return repositorySlug.replace('github.com/', '').replace('/', '-').toLowerCase();
+}
+
 async function runTest(name: string, fn: () => Promise<void>): Promise<void> {
   const start = Date.now();
   try {
@@ -79,18 +91,15 @@ async function main(): Promise<void> {
   const repoRoot = await findRepoRoot(currentDir);
   const packageJsonPath = path.join(repoRoot, 'package.json');
   const readmePath = path.join(repoRoot, 'README.md');
-  const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
-    homepage?: string;
-    repository?: { url?: string } | string;
-    bugs?: { url?: string };
-    author?: string | { name?: string; url?: string };
-    keywords?: string[];
-  };
+  const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as PackageJsonMetadata;
   const readme = await readFile(readmePath, 'utf8');
   const repositoryUrl = typeof packageJson.repository === 'string'
     ? packageJson.repository
     : packageJson.repository?.url;
   const repositorySlug = extractRepositorySlug(repositoryUrl ?? packageJson.homepage);
+  const lobeHubListingSlug = buildLobeHubListingSlug(repositorySlug);
+  const lobeHubBadgeUrl = `https://lobehub.com/badge/mcp/${lobeHubListingSlug}`;
+  const lobeHubListingUrl = `https://lobehub.com/mcp/${lobeHubListingSlug}`;
 
   console.log('Running metadata validation tests...\n');
 
@@ -137,8 +146,8 @@ async function main(): Promise<void> {
     const firstSection = readme.slice(0, README_TOP_SECTION_LENGTH);
     const orderedSnippets = [
       'img.shields.io',
-      'https://lobehub.com/badge/mcp/abdullah1854-mcpgateway',
-      'https://lobehub.com/mcp/abdullah1854-mcpgateway',
+      lobeHubBadgeUrl,
+      lobeHubListingUrl,
       '## Quick Links',
       '## Quick Start in 3 Commands',
       '## Supported MCP Clients',
