@@ -6,12 +6,50 @@
 [![MCP Transport](https://img.shields.io/badge/MCP-HTTP%20%2B%20SSE-7C3AED)](#endpoints)
 [![LobeHub MCP listing badge][lobehub-mcp-badge]][lobehub-mcp-listing]
 
-A universal Model Context Protocol (MCP) Gateway that aggregates multiple MCP servers and provides **result optimization** that native tool search doesn't offer. Works with all major MCP clients:
+> Universal MCP aggregation server that routes 300+ tools from multiple MCP servers through a single endpoint with 15 layers of token optimization (95-98% reduction). Works with Claude Desktop, Claude Code, Cursor, OpenAI Codex, and VS Code Copilot.
 
-- ✅ **Claude Desktop / Claude Code**
-- ✅ **Cursor**
-- ✅ **OpenAI Codex**
-- ✅ **VS Code Copilot**
+## Key Features
+
+- **Multi-Server Aggregation** — Connect multiple MCP servers (STDIO, HTTP, SSE) through one gateway endpoint
+- **15 Token Optimization Layers** — Progressive disclosure, smart filtering, aggregations, code batching, delta responses, auto-summarization, and more
+- **Web Dashboard** — Real-time UI to manage tools, backends, and server lifecycle with hot-reload
+- **Sandboxed Code Execution** — Execute TypeScript/JavaScript in secure Node.js VM for batch operations
+- **Skills System** — Save and reuse code patterns for zero-shot task execution
+- **Authentication** — API Key and OAuth/JWT support with rate limiting
+- **Docker Ready** — Easy deployment with Docker/Compose
+
+## Quick Install
+
+```bash
+git clone https://github.com/abdullah1854/MCPGateway.git
+cd MCPGateway
+npm install
+cp config/servers.example.json config/servers.json
+npm run dev
+```
+
+## Connect Your AI Client
+
+**Claude Desktop / Cursor / VS Code Copilot** — Add as remote MCP server:
+
+```
+http://localhost:3010/mcp
+```
+
+**Claude Code** — Add to settings:
+
+```json
+{
+  "mcpServers": {
+    "mcp-gateway": {
+      "type": "url",
+      "url": "http://localhost:3010/mcp"
+    }
+  }
+}
+```
+
+**Dashboard**: http://localhost:3010/dashboard
 
 **Best for:** teams that want one MCP endpoint, a browser dashboard, and aggressive token savings when working across many tools.
 
@@ -50,6 +88,8 @@ Then open `http://localhost:3010/dashboard`, connect your preferred client, and 
 | VS Code Copilot | ✅ | Centralizes MCP tooling across local and remote servers |
 
 ![MCP Gateway Architecture](screenshots/MCPGateway.jpg)
+
+---
 
 ## How MCP Gateway Complements Anthropic's Tool Search
 
