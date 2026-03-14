@@ -6,12 +6,61 @@
  *   npx tsx src/tests/metadata.test.ts
  */
 
-import { access, readFile } from 'node:fs/promises';
+import { access, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const currentDir = path.dirname(fileURLToPath(import.meta.url));
-const repoRoot = path.resolve(currentDir, '../..');
+// Covers the README opening area where badges, quick links, and install guidance should remain visible.
+const README_TOP_SECTION_LENGTH = 2500;
+
+async function findRepoRoot(startDir: string): Promise<string> {
+  let candidate = startDir;
+
+  while (true) {
+    try {
+      await access(path.join(candidate, 'package.json'));
+      return candidate;
+    } catch {
+      const parent = path.dirname(candidate);
+      if (parent === candidate) {
+        throw new Error('Could not locate repository root from metadata test');
+      }
+      candidate = parent;
+    }
+  }
+}
+
+function extractRepositorySlug(url: string | undefined): string {
+  const normalized = normalizeRepositoryUrl(url);
+  const match = normalized.match(/github\.com\/[^/]+\/[^/]+/);
+
+  if (!match) {
+    throw new Error(`Could not derive GitHub repository slug from: ${url}`);
+  }
+
+  return match[0];
+}
+
+function normalizeRepositoryUrl(url: string | undefined): string {
+  if (!url) {
+    return '';
+  }
+
+  let normalized = url;
+
+  if (normalized.startsWith('git+')) {
+    normalized = normalized.slice(4);
+  }
+  if (normalized.endsWith('.git')) {
+    normalized = normalized.slice(0, -4);
+  }
+  if (normalized.endsWith('#readme')) {
+    normalized = normalized.slice(0, -7);
+  }
+
+  return normalized;
+}
 
 async function runTest(name: string, fn: () => Promise<void>): Promise<void> {
   const start = Date.now();
@@ -27,36 +76,41 @@ async function runTest(name: string, fn: () => Promise<void>): Promise<void> {
 }
 
 async function main(): Promise<void> {
+  const repoRoot = await findRepoRoot(currentDir);
   const packageJsonPath = path.join(repoRoot, 'package.json');
   const readmePath = path.join(repoRoot, 'README.md');
   const packageJson = JSON.parse(await readFile(packageJsonPath, 'utf8')) as {
     homepage?: string;
     repository?: { url?: string } | string;
     bugs?: { url?: string };
-    author?: string;
+    author?: string | { name?: string; url?: string };
     keywords?: string[];
   };
   const readme = await readFile(readmePath, 'utf8');
+  const repositoryUrl = typeof packageJson.repository === 'string'
+    ? packageJson.repository
+    : packageJson.repository?.url;
+  const repositorySlug = extractRepositorySlug(repositoryUrl ?? packageJson.homepage);
 
   console.log('Running metadata validation tests...\n');
 
   await runTest('package.json includes repository trust metadata', async () => {
-    if (!packageJson.homepage?.includes('github.com/abdullah1854/MCPGateway')) {
+    if (!packageJson.homepage?.includes(repositorySlug)) {
       throw new Error(`Missing or invalid homepage: ${packageJson.homepage}`);
     }
 
-    const repositoryUrl = typeof packageJson.repository === 'string'
-      ? packageJson.repository
-      : packageJson.repository?.url;
-    if (!repositoryUrl?.includes('github.com/abdullah1854/MCPGateway')) {
+    if (!repositoryUrl?.includes(repositorySlug)) {
       throw new Error(`Missing or invalid repository URL: ${repositoryUrl}`);
     }
 
-    if (!packageJson.bugs?.url?.includes('github.com/abdullah1854/MCPGateway/issues')) {
+    if (!packageJson.bugs?.url?.includes(`${repositorySlug}/issues`)) {
       throw new Error(`Missing or invalid bugs URL: ${packageJson.bugs?.url}`);
     }
 
-    if (!packageJson.author?.trim()) {
+    const authorName = typeof packageJson.author === 'string'
+      ? packageJson.author.trim()
+      : packageJson.author?.name?.trim();
+    if (!authorName) {
       throw new Error('author must be non-empty');
     }
   });
@@ -80,18 +134,24 @@ async function main(): Promise<void> {
   });
 
   await runTest('README exposes quick-install and trust signals near the top', async () => {
-    const firstSection = readme.split('## How MCP Gateway Complements Anthropic')[0] ?? readme.slice(0, 2000);
-    const requiredSnippets = [
+    const firstSection = readme.slice(0, README_TOP_SECTION_LENGTH);
+    const orderedSnippets = [
       'img.shields.io',
       '## Quick Links',
       '## Quick Start in 3 Commands',
       '## Supported MCP Clients',
     ];
 
-    for (const snippet of requiredSnippets) {
-      if (!firstSection.includes(snippet)) {
+    let previousIndex = -1;
+    for (const snippet of orderedSnippets) {
+      const snippetIndex = firstSection.indexOf(snippet);
+      if (snippetIndex === -1) {
         throw new Error(`README top section is missing: ${snippet}`);
       }
+      if (snippetIndex < previousIndex) {
+        throw new Error(`README top section has unexpected snippet order around: ${snippet}`);
+      }
+      previousIndex = snippetIndex;
     }
   });
 
@@ -110,6 +170,21 @@ async function main(): Promise<void> {
   console.log('\nMetadata validation completed.');
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
-  void main();
+async function runIfEntryPoint(): Promise<void> {
+  const currentFilePath = await realpath(fileURLToPath(import.meta.url));
+  let entryPath = currentFilePath;
+
+  if (process.argv[1]) {
+    try {
+      entryPath = await realpath(path.resolve(process.argv[1]));
+    } catch {
+      entryPath = path.resolve(process.argv[1]);
+    }
+  }
+
+  if (entryPath === currentFilePath) {
+    await main();
+  }
 }
+
+void runIfEntryPoint();
