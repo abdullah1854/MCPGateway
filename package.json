@@ -1,7 +1,15 @@
 {
   "name": "mcp-gateway",
   "version": "1.0.0",
-  "description": "Universal MCP Gateway - Route multiple MCP servers through a single endpoint for Claude, Cursor, Codex, and VS Code",
+  "description": "Universal MCP Gateway for aggregating MCP servers into one HTTP/SSE endpoint with token optimization and a web dashboard.",
+  "homepage": "https://github.com/abdullah1854/MCPGateway#readme",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/abdullah1854/MCPGateway.git"
+  },
+  "bugs": {
+    "url": "https://github.com/abdullah1854/MCPGateway/issues"
+  },
   "type": "module",
   "main": "dist/index.js",
   "scripts": {
@@ -16,16 +24,28 @@
   },
   "keywords": [
     "mcp",
+    "model-context-protocol",
     "gateway",
+    "aggregation",
     "claude",
+    "claude-desktop",
     "cursor",
     "codex",
     "vscode",
     "copilot",
     "ai",
-    "tools"
+    "tools",
+    "dashboard",
+    "token-optimization",
+    "context-optimization",
+    "http",
+    "sse",
+    "typescript"
   ],
-  "author": "",
+  "author": {
+    "name": "abdullah1854",
+    "url": "https://github.com/abdullah1854"
+  },
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
