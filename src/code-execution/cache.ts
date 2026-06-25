@@ -5,6 +5,7 @@
  */
 
 import { logger } from '../logger.js';
+import { stableCanonicalJson } from '../utils/canonical-json.js';
 
 export interface CacheEntry<T> {
   value: T;
@@ -39,8 +40,7 @@ export class ResultCache<T = unknown> {
    * Generate cache key from tool name and arguments
    */
   static generateKey(toolName: string, args: unknown): string {
-    const argsStr = JSON.stringify(args, Object.keys(args as object).sort());
-    return `${toolName}:${argsStr}`;
+    return `${toolName}:${stableCanonicalJson(args)}`;
   }
 
   /**

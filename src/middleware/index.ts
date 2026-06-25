@@ -29,7 +29,7 @@ export {
   InMemorySessionStore,
   RedisRateLimitStore,
   RedisSessionStore,
-  stableCanonicalJson,
   StoreKeyBuilder,
 } from './stores.js';
 export type { GatewayStores, RateLimitEntry, RateLimitStore, RedisKeyValueClient, SessionStore } from './stores.js';
+export { stableCanonicalJson } from '../utils/canonical-json.js';

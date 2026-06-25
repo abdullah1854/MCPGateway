@@ -10,7 +10,7 @@
  * - 20 filesystem tools with path schema: 95% reduction
  */
 
-import { createHash } from 'crypto';
+import { byteLengthOfCanonicalJson, estimateTokensFromBytes, stableCanonicalHash } from '../utils/canonical-json.js';
 
 export interface SchemaReference {
   $ref: string;
@@ -42,16 +42,14 @@ export class SchemaDeduplicator {
    * Generate a deterministic hash for a schema
    */
   static hashSchema(schema: unknown): string {
-    // Normalize the schema for consistent hashing
-    const normalized = JSON.stringify(schema, Object.keys(schema as object).sort());
-    return createHash('sha256').update(normalized).digest('hex').substring(0, 12);
+    return stableCanonicalHash(schema, 12);
   }
 
   /**
    * Estimate tokens for a schema
    */
   static estimateTokens(schema: unknown): number {
-    return Math.ceil(JSON.stringify(schema).length / 4);
+    return estimateTokensFromBytes(byteLengthOfCanonicalJson(schema));
   }
 
   /**

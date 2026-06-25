@@ -11,7 +11,12 @@
  * - Pagination with caching
  */
 
-import { createHash } from 'crypto';
+import {
+  estimateTokensFromBytes,
+  byteLengthOfCanonicalJson,
+  stableCanonicalHash,
+  stableCanonicalJson,
+} from '../utils/canonical-json.js';
 
 export interface DeltaEntry {
   hash: string;
@@ -54,15 +59,14 @@ export interface DeltaPatch {
  * Generate a hash for data
  */
 function hashData(data: unknown): string {
-  const str = JSON.stringify(data);
-  return createHash('sha256').update(str).digest('hex').substring(0, 16);
+  return stableCanonicalHash(data, 16);
 }
 
 /**
  * Estimate size in tokens
  */
 function estimateTokens(data: unknown): number {
-  return Math.ceil(JSON.stringify(data).length / 4);
+  return estimateTokensFromBytes(byteLengthOfCanonicalJson(data));
 }
 
 /**
@@ -77,8 +81,7 @@ export class DeltaResponseManager {
    * Generate a cache key for a query
    */
   static generateKey(toolName: string, args: unknown): string {
-    const argsStr = JSON.stringify(args, Object.keys(args as object).sort());
-    return `delta:${toolName}:${argsStr}`;
+    return `delta:${toolName}:${stableCanonicalJson(args)}`;
   }
 
   /**

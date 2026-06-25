@@ -1,5 +1,8 @@
 import { GatewayConfig, GatewaySession, StoreBackend } from '../types.js';
 import { logger } from '../logger.js';
+import { stableCanonicalJson } from '../utils/canonical-json.js';
+
+export { stableCanonicalJson };
 
 export interface RateLimitEntry {
   count: number;
@@ -46,30 +49,6 @@ export interface RedisGatewayStoreOptions {
 
 const DEFAULT_NAMESPACE = 'mcp-gateway';
 const DEFAULT_MAX_RATE_LIMIT_ENTRIES = 10_000;
-
-function toCanonicalValue(value: unknown): unknown {
-  if (value instanceof Date) {
-    return value.toISOString();
-  }
-  if (Array.isArray(value)) {
-    return value.map(item => toCanonicalValue(item));
-  }
-  if (value && typeof value === 'object') {
-    const result: Record<string, unknown> = {};
-    for (const key of Object.keys(value).sort()) {
-      const nested = toCanonicalValue((value as Record<string, unknown>)[key]);
-      if (nested !== undefined) {
-        result[key] = nested;
-      }
-    }
-    return result;
-  }
-  return value;
-}
-
-export function stableCanonicalJson(value: unknown): string {
-  return JSON.stringify(toCanonicalValue(value));
-}
 
 function encodeKeyPart(value: string): string {
   return encodeURIComponent(value);

@@ -352,6 +352,7 @@ export async function handleExecutionToolCall(
             session: {
                 schemasInContext: sessionStats.schemasInContext,
                 duplicatesAvoided: sessionStats.duplicatesAvoided,
+                bytesSaved: sessionStats.bytesSaved,
                 tokensSaved: sessionStats.tokensSaved,
                 totalItemsSent: sessionStats.totalItemsSent,
             },
@@ -364,6 +365,7 @@ export async function handleExecutionToolCall(
             aggregate: {
                 activeSessions: aggregateStats.activeSessions,
                 totalDuplicatesAvoided: aggregateStats.totalDuplicatesAvoided,
+                totalBytesSaved: aggregateStats.totalBytesSaved,
                 totalTokensSaved: aggregateStats.totalTokensSaved,
             },
         };

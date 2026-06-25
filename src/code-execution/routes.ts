@@ -424,9 +424,10 @@ export function createCodeExecutionRoutes(backendManager: BackendManager, auditL
         });
         return;
       }
+      const authorization = getAuthorization(req);
       const decision = enforceAuthorization({
         action: 'tool_call',
-        authorization: getAuthorization(req),
+        authorization,
         toolName: name,
         sessionId: getSessionId(req),
         source: 'code-api',
@@ -441,20 +442,32 @@ export function createCodeExecutionRoutes(backendManager: BackendManager, auditL
 
       const tokenizer = getPIITokenizerForSession(getSessionId(req));
       const detokenizedArgs = tokenizer ? tokenizer.detokenizeObject(args) : args;
+      const cacheKey = ResultCache.generateKey(name, {
+        subject: authorization.subject,
+        args: detokenizedArgs,
+      });
+      const cachedResult = resultCache.get(cacheKey);
+      let rawResult: unknown;
 
-      // Call the tool
-      const response = await backendManager.callTool(name, detokenizedArgs);
+      if (cachedResult !== undefined) {
+        rawResult = cachedResult;
+      } else {
+        const response = await backendManager.callTool(name, detokenizedArgs);
 
-      if (response.error) {
-        res.status(400).json({
-          success: false,
-          error: response.error.message,
-        });
-        return;
+        if (response.error) {
+          res.status(400).json({
+            success: false,
+            error: response.error.message,
+          });
+          return;
+        }
+
+        rawResult = response.result;
+        resultCache.set(cacheKey, rawResult);
       }
 
       // Apply filtering if requested
-      let result = response.result;
+      let result = rawResult;
       const effectiveFilter =
         (filter as z.infer<typeof ResultFilterSchema> | undefined) ??
         ((smart as boolean | undefined) !== false ? { maxRows: 20, format: 'summary' } : undefined);
@@ -469,6 +482,7 @@ export function createCodeExecutionRoutes(backendManager: BackendManager, auditL
       res.json({
         success: true,
         result,
+        cache: { hit: cachedResult !== undefined },
       });
     } catch (error) {
       res.status(500).json({

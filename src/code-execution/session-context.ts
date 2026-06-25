@@ -8,8 +8,12 @@
  * the same tools are used repeatedly.
  */
 
-import { createHash } from 'crypto';
 import { logger } from '../logger.js';
+import {
+  byteLengthOfCanonicalJson,
+  estimateTokensFromBytes,
+  stableCanonicalHash,
+} from '../utils/canonical-json.js';
 
 export interface SentItem {
   hash: string;
@@ -17,6 +21,7 @@ export interface SentItem {
   type: 'schema' | 'result' | 'skill';
   name: string;
   tokens: number;
+  bytes: number;
 }
 
 export interface SessionContextStats {
@@ -26,6 +31,7 @@ export interface SessionContextStats {
   resultsInContext: number;
   skillsInContext: number;
   duplicatesAvoided: number;
+  bytesSaved: number;
   tokensSaved: number;
 }
 
@@ -35,6 +41,7 @@ export interface SessionContextStats {
 export class SessionContext {
   private sentItems = new Map<string, SentItem>();
   private duplicatesAvoided = 0;
+  private bytesSaved = 0;
   private tokensSaved = 0;
 
   // Items older than this threshold might be out of context window
@@ -44,16 +51,14 @@ export class SessionContext {
    * Generate a content hash for deduplication
    */
   static hash(content: unknown): string {
-    const str = typeof content === 'string' ? content : JSON.stringify(content);
-    return createHash('sha256').update(str).digest('hex').substring(0, 16);
+    return stableCanonicalHash(content, 16);
   }
 
   /**
    * Estimate tokens for content
    */
   static estimateTokens(content: unknown): number {
-    const str = typeof content === 'string' ? content : JSON.stringify(content);
-    return Math.ceil(str.length / 4);
+    return estimateTokensFromBytes(byteLengthOfCanonicalJson(content));
   }
 
   /**
@@ -97,7 +102,8 @@ export class SessionContext {
     content: unknown
   ): void {
     const hash = SessionContext.hash({ type, name, content });
-    const tokens = SessionContext.estimateTokens(content);
+    const bytes = byteLengthOfCanonicalJson(content);
+    const tokens = estimateTokensFromBytes(bytes);
 
     this.sentItems.set(hash, {
       hash,
@@ -105,6 +111,7 @@ export class SessionContext {
       type,
       name,
       tokens,
+      bytes,
     });
 
     // Prune old items to prevent memory growth
@@ -128,8 +135,9 @@ export class SessionContext {
   /**
    * Record that we avoided a duplicate
    */
-  recordDuplicateAvoided(tokens: number): void {
+  recordDuplicateAvoided(bytes: number, tokens: number): void {
     this.duplicatesAvoided++;
+    this.bytesSaved += bytes;
     this.tokensSaved += tokens;
   }
 
@@ -154,14 +162,18 @@ export class SessionContext {
     content: T
   ): { content: T | string; wasCached: boolean; tokensSaved: number } {
     const hash = SessionContext.hash({ type, name, content });
-    const tokens = SessionContext.estimateTokens(content);
+    const originalBytes = byteLengthOfCanonicalJson(content);
+    const reference = `[See ${type} "${name}" sent earlier in conversation]`;
+    const referenceBytes = Buffer.byteLength(reference, 'utf8');
+    const bytesSaved = Math.max(0, originalBytes - referenceBytes);
+    const tokensSaved = estimateTokensFromBytes(bytesSaved);
 
     if (this.hasBeenSent(hash)) {
-      this.recordDuplicateAvoided(tokens);
+      this.recordDuplicateAvoided(bytesSaved, tokensSaved);
       return {
-        content: `[See ${type} "${name}" sent earlier in conversation]`,
+        content: reference,
         wasCached: true,
-        tokensSaved: tokens,
+        tokensSaved,
       };
     }
 
@@ -222,6 +234,7 @@ export class SessionContext {
       resultsInContext,
       skillsInContext,
       duplicatesAvoided: this.duplicatesAvoided,
+      bytesSaved: this.bytesSaved,
       tokensSaved: this.tokensSaved,
     };
   }
@@ -232,6 +245,7 @@ export class SessionContext {
   clear(): void {
     this.sentItems.clear();
     this.duplicatesAvoided = 0;
+    this.bytesSaved = 0;
     this.tokensSaved = 0;
   }
 
@@ -299,20 +313,24 @@ class SessionContextManager {
   getAggregateStats(): {
     activeSessions: number;
     totalDuplicatesAvoided: number;
+    totalBytesSaved: number;
     totalTokensSaved: number;
   } {
     let totalDuplicatesAvoided = 0;
+    let totalBytesSaved = 0;
     let totalTokensSaved = 0;
 
     for (const context of this.sessions.values()) {
       const stats = context.getStats();
       totalDuplicatesAvoided += stats.duplicatesAvoided;
+      totalBytesSaved += stats.bytesSaved;
       totalTokensSaved += stats.tokensSaved;
     }
 
     return {
       activeSessions: this.sessions.size,
       totalDuplicatesAvoided,
+      totalBytesSaved,
       totalTokensSaved,
     };
   }
