@@ -52,6 +52,7 @@ async function main(): Promise<void> {
       server: httpServer,
       backendManager: server.getBackendManager(),
       gracePeriodMs: 15_000,
+      onShutdownComplete: () => server.flushAuditLogs(),
     });
   }
 

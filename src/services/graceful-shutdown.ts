@@ -41,8 +41,8 @@ export interface ShutdownOptions {
   server: Server;
   backendManager: BackendManager;
   gracePeriodMs?: number;    // default 15000
-  onShutdownStart?: () => void;
-  onShutdownComplete?: () => void;
+  onShutdownStart?: () => void | Promise<void>;
+  onShutdownComplete?: () => void | Promise<void>;
 }
 
 export function setupGracefulShutdown(options: ShutdownOptions): void {
@@ -86,7 +86,7 @@ export function setupGracefulShutdown(options: ShutdownOptions): void {
 
     if (onShutdownStart) {
       try {
-        onShutdownStart();
+        await onShutdownStart();
       } catch {
         // Callback errors should not block shutdown
       }
@@ -198,12 +198,12 @@ export function setupGracefulShutdown(options: ShutdownOptions): void {
 
       clearTimeout(forceKillTimer);
 
-      if (onShutdownComplete) {
-        try {
-          onShutdownComplete();
-        } catch {
-          // Callback errors should not block exit
-        }
+    if (onShutdownComplete) {
+      try {
+        await onShutdownComplete();
+      } catch {
+        // Callback errors should not block exit
+      }
       }
 
       logger.info('Graceful shutdown complete', {

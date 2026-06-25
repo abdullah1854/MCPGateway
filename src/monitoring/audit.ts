@@ -4,7 +4,8 @@
  * Tracks sensitive operations for security compliance and debugging.
  */
 
-import { appendFileSync, existsSync, mkdirSync } from 'fs';
+import { existsSync, mkdirSync } from 'fs';
+import { appendFile } from 'fs/promises';
 import { join, dirname } from 'path';
 import { fileURLToPath } from 'url';
 import { logger } from '../logger.js';
@@ -39,6 +40,21 @@ export interface AuditEvent {
   errorMessage?: string;
 }
 
+export interface AuditQueueStats {
+  queued: number;
+  dropped: number;
+  writeErrors: number;
+  flushing: boolean;
+}
+
+export interface AuditLoggerOptions {
+  logPath?: string;
+  persistToFile?: boolean;
+  maxQueueSize?: number;
+  batchSize?: number;
+  flushIntervalMs?: number;
+}
+
 /**
  * Audit Logger - Tracks and persists sensitive operations
  */
@@ -47,10 +63,21 @@ export class AuditLogger {
   private inMemoryLog: AuditEvent[] = [];
   private maxInMemory = 1000;
   private persistToFile: boolean;
+  private fileQueue: string[] = [];
+  private maxQueueSize: number;
+  private batchSize: number;
+  private flushIntervalMs: number;
+  private flushTimer: NodeJS.Timeout | null = null;
+  private flushPromise: Promise<void> | null = null;
+  private droppedEvents = 0;
+  private writeErrors = 0;
 
-  constructor(options?: { logPath?: string; persistToFile?: boolean }) {
+  constructor(options?: AuditLoggerOptions) {
     this.logPath = options?.logPath ?? join(__dirname, '../../logs/audit.log');
     this.persistToFile = options?.persistToFile ?? true;
+    this.maxQueueSize = options?.maxQueueSize ?? 10_000;
+    this.batchSize = options?.batchSize ?? 100;
+    this.flushIntervalMs = options?.flushIntervalMs ?? 100;
 
     if (this.persistToFile) {
       const logDir = dirname(this.logPath);
@@ -86,20 +113,85 @@ export class AuditLogger {
 
     // Persist to file
     if (this.persistToFile) {
-      this.appendToFile(fullEvent);
+      this.enqueueFileWrite(fullEvent);
     }
   }
 
   /**
    * Append event to audit log file
    */
-  private appendToFile(event: AuditEvent): void {
-    try {
-      const line = JSON.stringify(event) + '\n';
-      appendFileSync(this.logPath, line, 'utf-8');
-    } catch (error) {
-      logger.error('Failed to write audit log', { error });
+  private enqueueFileWrite(event: AuditEvent): void {
+    if (this.fileQueue.length >= this.maxQueueSize) {
+      this.droppedEvents++;
+      logger.error('Audit log queue overflow', {
+        eventType: event.eventType,
+        dropped: this.droppedEvents,
+        queued: this.fileQueue.length,
+      });
+      return;
     }
+
+    this.fileQueue.push(JSON.stringify(event) + '\n');
+    this.scheduleFlush();
+  }
+
+  private scheduleFlush(): void {
+    if (this.flushTimer || this.flushPromise) {
+      return;
+    }
+
+    this.flushTimer = setTimeout(() => {
+      this.flushTimer = null;
+      this.flush().catch(error => {
+        logger.error('Audit flush failed', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+      });
+    }, this.flushIntervalMs);
+    this.flushTimer.unref?.();
+  }
+
+  async flush(): Promise<void> {
+    if (this.flushTimer) {
+      clearTimeout(this.flushTimer);
+      this.flushTimer = null;
+    }
+
+    if (this.flushPromise) {
+      await this.flushPromise;
+      return;
+    }
+
+    this.flushPromise = this.flushQueuedEvents();
+    try {
+      await this.flushPromise;
+    } finally {
+      this.flushPromise = null;
+    }
+  }
+
+  private async flushQueuedEvents(): Promise<void> {
+    while (this.fileQueue.length > 0) {
+      const batch = this.fileQueue.splice(0, this.batchSize);
+      try {
+        await appendFile(this.logPath, batch.join(''), 'utf-8');
+      } catch (error) {
+        this.writeErrors += batch.length;
+        logger.error('Failed to write audit log', {
+          error: error instanceof Error ? error.message : String(error),
+          writeErrors: this.writeErrors,
+        });
+      }
+    }
+  }
+
+  getQueueStats(): AuditQueueStats {
+    return {
+      queued: this.fileQueue.length,
+      dropped: this.droppedEvents,
+      writeErrors: this.writeErrors,
+      flushing: this.flushPromise !== null,
+    };
   }
 
   /**

@@ -377,6 +377,7 @@ export class MCPGatewayServer {
     await this.backendManager.disconnectAll();
 
     await this.stores.close();
+    await this.auditLogger.flush();
 
     // Close server
     if (this.server) {
@@ -417,6 +418,10 @@ export class MCPGatewayServer {
    */
   getAuditLogger(): AuditLogger {
     return this.auditLogger;
+  }
+
+  async flushAuditLogs(): Promise<void> {
+    await this.auditLogger.flush();
   }
 
   /**
