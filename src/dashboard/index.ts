@@ -12,16 +12,9 @@ import { ServerConfigSchema, ServerConfig } from '../types.js';
 import { logger } from '../logger.js';
 import { generateTopology } from '../services/topology.js';
 import {
-  getCachedUsageData,
-  getUsageByDateRange,
-  getCurrentSessionUsage,
-  clearUsageCache,
-} from '../services/claude-usage.js';
-import {
-  getAntigravitySummary,
-  clearAntigravityCache,
-  hasAntigravityAccounts,
-} from '../services/antigravity-usage.js';
+  getChronicleMemory,
+  listChronicleMemories,
+} from '../services/chronicle-memory.js';
 import { getDashboardHTML, getPlaygroundHTML } from './render.js';
 
 // Helper to find which backend a tool belongs to based on prefix
@@ -56,57 +49,9 @@ function persistUIState(backendManager: BackendManager): void {
   });
 }
 
-type HelperAgentId = 'kimi' | 'minimax' | 'zai' | 'codex';
-
-interface HelperAgentDefinition {
-  id: HelperAgentId;
-  displayName: string;
-  specialization: string;
-  primaryTaskTypes: string[];
-  fallbackTaskTypes: string[];
-  defaultModels: string[];
-}
-
-const HELPER_ROUTER_BACKEND_ID = 'multi-model-router';
-const HELPER_ROUTER_REQUIRED_TOOL_SUFFIXES = ['list_models', 'call_model', 'route_task'];
-
-const HELPER_AGENT_DEFINITIONS: HelperAgentDefinition[] = [
-  {
-    id: 'kimi',
-    displayName: 'Kimi K2.5',
-    specialization: 'Coding assistant for delegated implementation tasks and pair programming',
-    primaryTaskTypes: ['coding', 'implementation', 'file-editing'],
-    fallbackTaskTypes: ['general', 'debugging'],
-    defaultModels: ['kimi-k2-0905-preview'],
-  },
-  {
-    id: 'minimax',
-    displayName: 'Minimax M2.5',
-    specialization: 'Coding assistant for delegated implementation tasks and fast prototyping',
-    primaryTaskTypes: ['coding', 'implementation', 'file-editing'],
-    fallbackTaskTypes: ['general', 'fast'],
-    defaultModels: ['MiniMax-M2.5'],
-  },
-  {
-    id: 'zai',
-    displayName: 'Z.AI (GLM 4.7)',
-    specialization: 'Content writing, documentation, copywriting, and creative text generation',
-    primaryTaskTypes: ['content-writing', 'documentation', 'creative', 'copywriting'],
-    fallbackTaskTypes: ['translation', 'summarization'],
-    defaultModels: ['glm-4.7'],
-  },
-  {
-    id: 'codex',
-    displayName: 'Codex CLI',
-    specialization: 'Code review, planning, auditing, and architectural oversight',
-    primaryTaskTypes: ['code-review', 'planning', 'auditing', 'architecture'],
-    fallbackTaskTypes: ['analysis', 'general'],
-    defaultModels: ['codex-cli'],
-  },
-];
-
 export function createDashboardRoutes(backendManager: BackendManager): Router {
   const router = Router();
+  const configManager = ConfigManager.getInstance();
 
   // Serve the dashboard HTML
   router.get('/', (_req: Request, res: Response) => {
@@ -161,8 +106,12 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
   // API: Get feature flags (optional features that can be enabled/disabled)
   router.get('/api/feature-flags', (_req: Request, res: Response) => {
     const configManager = ConfigManager.getInstance();
+    const features = configManager.getFeatureFlags();
     res.json({
-      features: configManager.getFeatureFlags(),
+      features: {
+        skills: features.skills,
+        chronicle: true,
+      },
     });
   });
 
@@ -237,57 +186,28 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
     });
   });
 
-  // API: Helper agents routing and availability
-  router.get('/api/helper-agents', (_req: Request, res: Response) => {
-    const backends = backendManager.getBackends();
-    const status = backendManager.getStatus();
-    const disabledBackends = backendManager.getDisabledBackends();
+  // API: Chronicle daily memory summaries
+  router.get('/api/chronicle/daily', async (req: Request, res: Response) => {
+    try {
+      const date = typeof req.query.date === 'string' ? req.query.date : undefined;
+      res.json(await listChronicleMemories(date));
+    } catch (error) {
+      res.status(503).json({
+        error: 'Chronicle memories not available',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
+  });
 
-    const routerBackend = backends.get(HELPER_ROUTER_BACKEND_ID);
-    const routerStatus = status[HELPER_ROUTER_BACKEND_ID];
-    const routerEnabled = routerBackend ? !disabledBackends.has(HELPER_ROUTER_BACKEND_ID) : false;
-    const routerConnectionState = routerStatus?.status ?? 'not-configured';
-    const routerTools = routerBackend?.tools?.map(tool => tool.name) ?? [];
-    const normalizedPrefix = (routerBackend?.config.toolPrefix ?? 'multi').replace(/_+$/g, '');
-    const requiredTools = HELPER_ROUTER_REQUIRED_TOOL_SUFFIXES.map(
-      suffix => `${normalizedPrefix}_${suffix}`,
-    );
-    const missingTools = HELPER_ROUTER_REQUIRED_TOOL_SUFFIXES
-      .filter(suffix => !routerTools.some(toolName => toolName.endsWith(`_${suffix}`)))
-      .map(suffix => `${normalizedPrefix}_${suffix}`);
-
-    const routerAvailability = !routerBackend
-      ? 'not-configured'
-      : !routerEnabled
-        ? 'disabled'
-        : routerConnectionState === 'connected'
-          ? 'connected'
-          : 'disconnected';
-
-    const agents = HELPER_AGENT_DEFINITIONS.map(agent => ({
-      ...agent,
-      availability: routerAvailability === 'connected' ? 'available' : 'unavailable',
-      routeMethod:
-        agent.id === 'codex'
-          ? 'multi_route_task(taskType="file-editing")'
-          : 'multi_route_task(taskType=...)',
-    }));
-
-    res.json({
-      router: {
-        id: HELPER_ROUTER_BACKEND_ID,
-        availability: routerAvailability,
-        status: routerConnectionState,
-        enabled: routerEnabled,
-        toolPrefix: `${normalizedPrefix}_`,
-        requiredTools,
-        availableTools: routerTools,
-        missingTools,
-        error: routerStatus?.error ?? null,
-      },
-      agents,
-      generatedAt: new Date().toISOString(),
-    });
+  router.get('/api/chronicle/memory/:id', async (req: Request, res: Response) => {
+    try {
+      res.json(await getChronicleMemory(req.params.id));
+    } catch (error) {
+      res.status(404).json({
+        error: 'Chronicle memory not found',
+        message: error instanceof Error ? error.message : String(error),
+      });
+    }
   });
 
   // API: Trigger Fabric login (az login with Fabric scope)
@@ -728,450 +648,6 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
     } catch (error) {
       res.status(500).json({
         error: 'Failed to update gateway settings',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // ==========================================
-  // Claude Usage API Routes
-  // ==========================================
-
-  // Helper to check if Claude usage feature is enabled
-  const requireClaudeUsageEnabled = (res: Response): boolean => {
-    if (!configManager.isClaudeUsageEnabled()) {
-      res.status(404).json({
-        error: 'Feature disabled',
-        message: 'Claude Usage feature is not enabled. Set ENABLE_CLAUDE_USAGE=1 in your environment to enable it.',
-      });
-      return false;
-    }
-    return true;
-  };
-
-  // API: Get Claude usage summary
-  router.get('/api/claude-usage', async (_req: Request, res: Response) => {
-    if (!requireClaudeUsageEnabled(res)) return;
-    try {
-      const usageData = await getCachedUsageData();
-      if (!usageData) {
-        res.status(503).json({
-          error: 'Usage data not available',
-          message: 'Could not fetch Claude usage data. Make sure ccusage is installed (npx ccusage@latest)',
-        });
-        return;
-      }
-      res.json(usageData);
-    } catch (error) {
-      res.status(500).json({
-        error: 'Failed to fetch usage data',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // API: Get Claude usage by date range
-  router.get('/api/claude-usage/range', async (req: Request, res: Response) => {
-    if (!requireClaudeUsageEnabled(res)) return;
-    try {
-      const { since, until } = req.query;
-      const usageData = await getUsageByDateRange(
-        since as string | undefined,
-        until as string | undefined
-      );
-      if (!usageData) {
-        res.status(503).json({
-          error: 'Usage data not available',
-          message: 'Could not fetch Claude usage data for the specified range',
-        });
-        return;
-      }
-      res.json(usageData);
-    } catch (error) {
-      res.status(500).json({
-        error: 'Failed to fetch usage data',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // API: Get current session usage (live monitoring)
-  router.get('/api/claude-usage/current', async (_req: Request, res: Response) => {
-    if (!requireClaudeUsageEnabled(res)) return;
-    try {
-      const sessionUsage = await getCurrentSessionUsage();
-      if (!sessionUsage) {
-        res.json({ active: false, message: 'No active session found' });
-        return;
-      }
-      res.json({ active: true, session: sessionUsage });
-    } catch (error) {
-      res.status(500).json({
-        error: 'Failed to fetch current session',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // API: Refresh usage cache
-  router.post('/api/claude-usage/refresh', async (_req: Request, res: Response) => {
-    if (!requireClaudeUsageEnabled(res)) return;
-    try {
-      clearUsageCache();
-      const usageData = await getCachedUsageData(true);
-      if (!usageData) {
-        res.status(503).json({
-          error: 'Usage data not available',
-          message: 'Could not refresh Claude usage data',
-        });
-        return;
-      }
-      res.json({ success: true, data: usageData });
-    } catch (error) {
-      res.status(500).json({
-        error: 'Failed to refresh usage data',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // ==========================================
-  // Cipher Memory API Routes
-  // ==========================================
-  const configManager = ConfigManager.getInstance();
-  const CIPHER_API_URL = process.env.CIPHER_API_URL || 'http://localhost:8082';
-
-  // Helper to check if cipher feature is enabled
-  const requireCipherEnabled = (res: Response): boolean => {
-    if (!configManager.isCipherEnabled()) {
-      res.status(404).json({
-        error: 'Feature disabled',
-        message: 'Cipher Memory feature is not enabled. Set ENABLE_CIPHER=1 in your environment to enable it.',
-      });
-      return false;
-    }
-    return true;
-  };
-
-  // API: Get Cipher memory sessions
-  router.get('/api/cipher/sessions', async (_req: Request, res: Response) => {
-    if (!requireCipherEnabled(res)) return;
-    try {
-      const response = await fetch(`${CIPHER_API_URL}/api/sessions`);
-      if (!response.ok) {
-        throw new Error(`Cipher API returned ${response.status}`);
-      }
-      const data = await response.json();
-      res.json(data);
-    } catch (error) {
-      res.status(503).json({
-        error: 'Cipher memory not available',
-        message: error instanceof Error ? error.message : 'Could not connect to Cipher. Make sure cipher-memory is running.',
-      });
-    }
-  });
-
-  // API: Get Cipher session history
-  router.get('/api/cipher/sessions/:sessionId/history', async (req: Request, res: Response) => {
-    if (!requireCipherEnabled(res)) return;
-    try {
-      const { sessionId } = req.params;
-      const response = await fetch(`${CIPHER_API_URL}/api/sessions/${sessionId}/history`);
-      if (!response.ok) {
-        throw new Error(`Cipher API returned ${response.status}`);
-      }
-      const data = await response.json();
-      res.json(data);
-    } catch (error) {
-      res.status(503).json({
-        error: 'Failed to fetch session history',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // API: Ask Cipher (send message to memory)
-  router.post('/api/cipher/ask', async (req: Request, res: Response) => {
-    if (!requireCipherEnabled(res)) return;
-    try {
-      const { message } = req.body;
-      if (!message) {
-        res.status(400).json({ error: 'Message is required' });
-        return;
-      }
-      const response = await fetch(`${CIPHER_API_URL}/api/message/sync`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message }),
-      });
-      if (!response.ok) {
-        throw new Error(`Cipher API returned ${response.status}`);
-      }
-      const data = await response.json();
-      res.json(data);
-    } catch (error) {
-      res.status(503).json({
-        error: 'Failed to communicate with Cipher',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // API: Search Cipher memory
-  router.get('/api/cipher/search', async (req: Request, res: Response) => {
-    if (!requireCipherEnabled(res)) return;
-    try {
-      const { q } = req.query;
-      if (!q) {
-        res.status(400).json({ error: 'Search query (q) is required' });
-        return;
-      }
-      // Search by asking Cipher
-      const response = await fetch(`${CIPHER_API_URL}/api/message/sync`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ message: `Search memory for: ${q}` }),
-      });
-      if (!response.ok) {
-        throw new Error(`Cipher API returned ${response.status}`);
-      }
-      const data = await response.json();
-      res.json(data);
-    } catch (error) {
-      res.status(503).json({
-        error: 'Failed to search Cipher memory',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // API: Get Qdrant memory stats (actual persistent memories)
-  const QDRANT_URL = process.env.QDRANT_URL;
-  const QDRANT_API_KEY = process.env.QDRANT_API_KEY;
-  const QDRANT_COLLECTION = process.env.QDRANT_COLLECTION || 'cipher_knowledge';
-  const QDRANT_TIMEOUT_MS = parseInt(process.env.QDRANT_TIMEOUT_MS ?? '8000', 10);
-  const qdrantTimeoutMs = Number.isFinite(QDRANT_TIMEOUT_MS)
-    ? Math.max(QDRANT_TIMEOUT_MS, 1000)
-    : 8000;
-
-  const qdrantFetch = async (url: string, options: RequestInit = {}) => {
-    const controller = new AbortController();
-    const timeoutId = setTimeout(() => controller.abort(), qdrantTimeoutMs);
-    try {
-      return await fetch(url, { ...options, signal: controller.signal });
-    } finally {
-      clearTimeout(timeoutId);
-    }
-  };
-
-  const ensureQdrantConfigured = (res: Response): boolean => {
-    if (!QDRANT_URL || !QDRANT_API_KEY) {
-      res.status(503).json({
-        error: 'Qdrant not configured',
-        message: 'Set QDRANT_URL and QDRANT_API_KEY in the environment to enable Cipher memory stats.',
-      });
-      return false;
-    }
-    return true;
-  };
-
-  router.get('/api/cipher/qdrant-stats', async (_req: Request, res: Response) => {
-    if (!requireCipherEnabled(res)) return;
-    try {
-      if (!ensureQdrantConfigured(res)) {
-        return;
-      }
-      // Get collection info
-      const collectionRes = await qdrantFetch(`${QDRANT_URL}/collections/${QDRANT_COLLECTION}`, {
-        headers: { 'api-key': QDRANT_API_KEY! },
-      });
-      if (!collectionRes.ok) {
-        throw new Error(`Qdrant returned ${collectionRes.status}`);
-      }
-      const collectionData = (await collectionRes.json()) as { result?: { points_count?: number } };
-      const totalMemories = collectionData.result?.points_count || 0;
-
-      // Get all memories and sort client-side (Qdrant scroll doesn't guarantee order)
-      // Fetch more points to ensure we get recent ones
-      const scrollRes = await qdrantFetch(`${QDRANT_URL}/collections/${QDRANT_COLLECTION}/points/scroll`, {
-        method: 'POST',
-        headers: {
-          'api-key': QDRANT_API_KEY!,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify({
-          limit: 500,
-          with_payload: true,
-          with_vector: false,
-        }),
-      });
-
-      let decisions = 0;
-      let learnings = 0;
-      let patterns = 0;
-      let insights = 0;
-      const recentMemories: any[] = [];
-
-      if (scrollRes.ok) {
-        const scrollData = (await scrollRes.json()) as { result?: { points?: any[] } };
-        const points = scrollData.result?.points || [];
-
-        // Categorize memories based on content
-        for (const point of points) {
-          const text = (point.payload?.text || '').toLowerCase();
-          const tags = point.payload?.tags || [];
-
-          if (text.includes('decision') || text.includes('store decision') || tags.includes('decision')) {
-            decisions++;
-          } else if (text.includes('learning') || text.includes('learned') || tags.includes('learning')) {
-            learnings++;
-          } else if (text.includes('pattern') || tags.includes('pattern')) {
-            patterns++;
-          } else if (text.includes('insight') || tags.includes('insight')) {
-            insights++;
-          }
-        }
-
-        // Get 50 most recent memories
-        const sortedPoints = points.sort((a: any, b: any) => {
-          const timeA = new Date(a.payload?.timestamp || 0).getTime();
-          const timeB = new Date(b.payload?.timestamp || 0).getTime();
-          return timeB - timeA;
-        });
-
-        for (const point of sortedPoints.slice(0, 50)) {
-          recentMemories.push({
-            id: point.id,
-            text: point.payload?.text?.substring(0, 200) + (point.payload?.text?.length > 200 ? '...' : ''),
-            timestamp: point.payload?.timestamp,
-            tags: point.payload?.tags,
-            projectPath: point.payload?.projectPath,
-          });
-        }
-      }
-
-      res.json({
-        success: true,
-        stats: {
-          totalMemories,
-          decisions,
-          learnings,
-          patterns,
-          insights,
-        },
-        recentMemories,
-        collection: QDRANT_COLLECTION,
-        lastUpdated: new Date().toISOString(),
-      });
-    } catch (error) {
-      res.status(503).json({
-        error: 'Failed to fetch Qdrant stats',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // API: Get single memory by ID from Qdrant
-  router.get('/api/cipher/memory/:id', async (req: Request, res: Response) => {
-    if (!requireCipherEnabled(res)) return;
-    const { id } = req.params;
-
-    try {
-      if (!ensureQdrantConfigured(res)) {
-        return;
-      }
-      const pointRes = await qdrantFetch(`${QDRANT_URL}/collections/${QDRANT_COLLECTION}/points/${id}`, {
-        method: 'GET',
-        headers: {
-          'api-key': QDRANT_API_KEY!,
-          'Content-Type': 'application/json',
-        },
-      });
-
-      if (!pointRes.ok) {
-        return res.status(404).json({ error: 'Memory not found' });
-      }
-
-      const pointData = (await pointRes.json()) as { result?: { id?: string; payload?: any } };
-      const point = pointData.result;
-
-      if (!point) {
-        return res.status(404).json({ error: 'Memory not found' });
-      }
-
-      return res.json({
-        success: true,
-        memory: {
-          id: point.id,
-          text: point.payload?.text || '',
-          timestamp: point.payload?.timestamp,
-          tags: point.payload?.tags || [],
-          projectPath: point.payload?.projectPath,
-          metadata: point.payload?.metadata || {},
-        },
-      });
-    } catch (error) {
-      return res.status(500).json({
-        error: 'Failed to fetch memory',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // ==========================================
-  // Antigravity Usage API Routes
-  // ==========================================
-
-  // Helper to check if antigravity feature is enabled
-  const requireAntigravityEnabled = (res: Response): boolean => {
-    if (!configManager.isAntigravityEnabled()) {
-      res.status(404).json({
-        error: 'Feature disabled',
-        message: 'Antigravity Usage feature is not enabled. Set ENABLE_ANTIGRAVITY=1 in your environment to enable it.',
-      });
-      return false;
-    }
-    return true;
-  };
-
-  // API: Check if Antigravity accounts exist
-  router.get('/api/antigravity/available', async (_req: Request, res: Response) => {
-    if (!requireAntigravityEnabled(res)) return;
-    try {
-      const available = await hasAntigravityAccounts();
-      res.json({ available });
-    } catch (error) {
-      res.status(500).json({
-        error: 'Failed to check Antigravity availability',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // API: Get Antigravity usage summary
-  router.get('/api/antigravity/summary', async (_req: Request, res: Response) => {
-    if (!requireAntigravityEnabled(res)) return;
-    try {
-      const summary = await getAntigravitySummary();
-      res.json(summary);
-    } catch (error) {
-      res.status(500).json({
-        error: 'Failed to fetch Antigravity summary',
-        message: error instanceof Error ? error.message : String(error),
-      });
-    }
-  });
-
-  // API: Refresh Antigravity cache
-  router.post('/api/antigravity/refresh', async (_req: Request, res: Response) => {
-    if (!requireAntigravityEnabled(res)) return;
-    try {
-      clearAntigravityCache();
-      const summary = await getAntigravitySummary(true);
-      res.json({ success: true, data: summary });
-    } catch (error) {
-      res.status(500).json({
-        error: 'Failed to refresh Antigravity data',
         message: error instanceof Error ? error.message : String(error),
       });
     }

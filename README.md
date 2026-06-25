@@ -389,6 +389,8 @@ curl -sS http://127.0.0.1:3010/health/summary
 | `/dashboard/api/backends/:id` | DELETE | Remove backend server |
 | `/dashboard/api/config/export` | GET | Export server configuration |
 | `/dashboard/api/config/import` | POST | Import server configuration |
+| `/dashboard/api/chronicle/daily?date=YYYY-MM-DD` | GET | List Chronicle daily memory summaries |
+| `/dashboard/api/chronicle/memory/:id` | GET | Read one Chronicle memory summary |
 | `/dashboard/api/restart` | POST | Restart the gateway server |
 
 ## Dashboard
@@ -405,6 +407,7 @@ Access the web dashboard at `http://localhost:3010/dashboard` to:
 - **Reconnect failed backends** with one click
 - Restart the entire gateway server
 - View tool counts and backend health at a glance
+- Review Chronicle daily memory summaries from local Codex Chronicle files
 
 The dashboard persists UI state (disabled tools/backends) across server restarts.
 
@@ -718,39 +721,14 @@ MCP Gateway includes optional features that are **disabled by default** for mini
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `ENABLE_SKILLS` | `0` | Enable Skills system - reusable code patterns and skill execution |
-| `ENABLE_CIPHER` | `0` | Enable Cipher Memory - cross-IDE persistent memory with Qdrant vector store |
-| `ENABLE_ANTIGRAVITY` | `0` | Enable Antigravity Usage - IDE quota tracking for Antigravity IDE |
-| `ENABLE_CLAUDE_USAGE` | `0` | Enable Claude Usage - API token consumption tracking |
+| `CHRONICLE_MEMORY_DIR` | `~/.codex/memories/extensions/chronicle/resources` | Optional override for the local Chronicle daily-memory resource directory |
 
 When a feature is disabled:
 - The corresponding dashboard tab is hidden
 - API endpoints return `404 Feature disabled` with instructions to enable
-- No errors occur from missing dependencies (Qdrant, Cipher service, etc.)
+- No errors occur from missing optional services.
 
-**For personal/development use**, enable the features you need in your `.env`:
-
-```bash
-# Enable all optional features
-ENABLE_SKILLS=1
-ENABLE_CIPHER=1
-ENABLE_ANTIGRAVITY=1
-ENABLE_CLAUDE_USAGE=1
-
-# Disable lite mode to see all gateway tools
-GATEWAY_LITE_MODE=0
-```
-
-### Feature-Specific Configuration
-
-These variables are only needed when the corresponding feature is enabled:
-
-| Variable | Feature | Default | Description |
-|----------|---------|---------|-------------|
-| `CIPHER_API_URL` | Cipher | `http://localhost:8082` | Cipher Memory service URL |
-| `QDRANT_URL` | Cipher | - | Qdrant vector store URL |
-| `QDRANT_API_KEY` | Cipher | - | Qdrant API key |
-| `QDRANT_COLLECTION` | Cipher | `cipher_knowledge` | Qdrant collection name |
-| `QDRANT_TIMEOUT_MS` | Cipher | `8000` | Qdrant request timeout |
+Chronicle daily memory is read from local Codex Chronicle summaries when available. It does not require the old Cipher, Claude Usage, or Antigravity usage integrations.
 
 ## Optional Features Guide
 
@@ -1035,309 +1013,26 @@ For the full list: ls .agents/skills/
 
 ---
 
-### Cipher Memory (`ENABLE_CIPHER=1`)
+### Chronicle Daily Memory
 
-Cipher Memory provides **persistent AI memory across all IDEs**. Decisions, learnings, patterns, and insights are stored in a vector database and recalled automatically in future sessions.
+The dashboard Memory tab now reads Chronicle summaries directly from local Codex memory files. By default it loads Markdown summaries from:
 
-#### What Cipher Does
-
-- **Cross-IDE memory** - Memories persist across Claude, Cursor, Windsurf, VS Code, Codex
-- **Project-scoped context** - Filter memories by project path
-- **Semantic search** - Find relevant memories using natural language
-- **Auto-consolidation** - Session summaries stored automatically
-
-#### Prerequisites
-
-Cipher requires two external services:
-
-1. **Cipher Memory Service** - The memory API (default: `http://localhost:8082`)
-2. **Qdrant Vector Store** - For semantic memory storage
-
-#### Enabling Cipher
-
-```bash
-# In your .env file
-ENABLE_CIPHER=1
-
-# Cipher service URL (if not running on default port)
-CIPHER_API_URL=http://localhost:8082
-
-# Qdrant configuration (required for memory stats)
-QDRANT_URL=https://your-qdrant-instance.cloud
-QDRANT_API_KEY=your-qdrant-api-key
-QDRANT_COLLECTION=cipher_knowledge
-QDRANT_TIMEOUT_MS=8000
+```
+~/.codex/memories/extensions/chronicle/resources
 ```
 
-#### Using Cipher via MCP
-
-The Cipher service exposes the `cipher_ask_cipher` tool via MCP:
-
-```javascript
-// Store a decision
-cipher_ask_cipher({
-  message: "STORE DECISION: Using PostgreSQL for the user service. Reasoning: Better JSON support.",
-  projectPath: "/path/to/your/project"
-});
-
-// Recall context
-cipher_ask_cipher({
-  message: "Recall context for this project. What do you remember?",
-  projectPath: "/path/to/your/project"
-});
-
-// Search memories
-cipher_ask_cipher({
-  message: "Search memory for: database decisions",
-  projectPath: "/path/to/your/project"
-});
-```
-
-#### Memory Types
-
-| Prefix | Use Case | Example |
-|--------|----------|---------|
-| `STORE DECISION:` | Architectural choices | "STORE DECISION: Using Redis for caching" |
-| `STORE LEARNING:` | Bug fixes, discoveries | "STORE LEARNING: Fixed race condition in auth" |
-| `STORE MILESTONE:` | Completed features | "STORE MILESTONE: Completed user auth system" |
-| `STORE PATTERN:` | Code patterns | "STORE PATTERN: Repository pattern for data access" |
-| `STORE BLOCKER:` | Ongoing issues | "STORE BLOCKER: CI failing on ARM builds" |
-
-#### Dashboard API
+The dashboard exposes two local endpoints:
 
 | Endpoint | Method | Description |
 |----------|--------|-------------|
-| `/dashboard/api/cipher/sessions` | GET | List memory sessions |
-| `/dashboard/api/cipher/sessions/:id/history` | GET | Get session history |
-| `/dashboard/api/cipher/ask` | POST | Send message to Cipher |
-| `/dashboard/api/cipher/search?q=query` | GET | Search memories |
-| `/dashboard/api/cipher/qdrant-stats` | GET | Get vector store statistics |
-| `/dashboard/api/cipher/memory/:id` | GET | Get specific memory by ID |
+| `/dashboard/api/chronicle/daily?date=YYYY-MM-DD` | GET | List Chronicle summaries for a day |
+| `/dashboard/api/chronicle/memory/:id` | GET | Read one Chronicle memory file |
 
-#### Dashboard
+The daily view shows the latest 10-minute and 6-hour Chronicle summaries, with a date picker for previous days. Invalid memory IDs are rejected server-side and absolute local paths are not returned to the browser.
 
-When enabled, a **Memory** tab appears showing:
-- Total memories stored in Qdrant
-- Recent memories with timestamps
-- Memory categories breakdown (decisions, learnings, etc.)
-- Search interface for finding memories
-- Session history viewer
+### Retired Dashboard Integrations
 
----
-
-### Claude Usage Tracking (`ENABLE_CLAUDE_USAGE=1`)
-
-Track your Claude API token consumption and costs across all Claude Code sessions.
-
-#### What It Does
-
-- **Aggregate usage data** from Claude Code JSONL logs
-- **Track costs** by model (Opus, Sonnet, Haiku)
-- **Monitor cache efficiency** (creation vs read tokens)
-- **View daily/weekly/monthly trends**
-- **Live session monitoring**
-
-#### Prerequisites
-
-This feature uses the `ccusage` CLI tool to parse Claude Code conversation logs from `~/.claude/projects/`.
-
-```bash
-# The tool is auto-installed via npx when needed
-npx ccusage@latest --json
-```
-
-#### Enabling Claude Usage
-
-```bash
-# In your .env file
-ENABLE_CLAUDE_USAGE=1
-```
-
-No additional configuration required - the service automatically finds Claude Code logs.
-
-#### Dashboard API
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/dashboard/api/claude-usage` | GET | Get usage summary (cached 5 min) |
-| `/dashboard/api/claude-usage/range?since=YYYY-MM-DD&until=YYYY-MM-DD` | GET | Get usage for date range |
-| `/dashboard/api/claude-usage/current` | GET | Get live session usage |
-| `/dashboard/api/claude-usage/refresh` | POST | Force refresh cached data |
-
-#### Response Format
-
-```json
-{
-  "totalCost": 45.67,
-  "totalInputTokens": 15000000,
-  "totalOutputTokens": 2500000,
-  "totalCacheCreationTokens": 500000,
-  "totalCacheReadTokens": 12000000,
-  "cacheHitRatio": 96.0,
-  "daysActive": 30,
-  "avgCostPerDay": 1.52,
-  "modelDistribution": [
-    { "model": "Claude Sonnet", "cost": 40.00, "percentage": 87.5 },
-    { "model": "Claude Opus", "cost": 5.67, "percentage": 12.5 }
-  ],
-  "topDays": [...],
-  "daily": [...]
-}
-```
-
-#### Dashboard
-
-When enabled, a **Usage** tab appears showing:
-- Total cost and token breakdown
-- Cost by model pie chart
-- Cache hit ratio (higher = more efficient)
-- Daily usage trend graph
-- Top usage days
-- Live current session monitoring
-
----
-
-### Antigravity Usage Tracking (`ENABLE_ANTIGRAVITY=1`)
-
-Track quota and usage for Antigravity IDE (formerly Windsurf/Codeium) accounts.
-
-#### What It Does
-
-- **Real-time quota monitoring** for all model tiers
-- **Multi-account support** (Antigravity + Techgravity accounts)
-- **Conversation statistics** from local data
-- **Brain/task tracking** for agentic workflows
-- **Auto-detection** of running Language Server processes
-
-#### How It Works
-
-The service:
-1. Detects running `language_server_macos` processes
-2. Extracts CSRF tokens and ports from process arguments
-3. Queries the local gRPC-Web endpoint for quota data
-4. Falls back to file-based stats if API unavailable
-
-#### Prerequisites
-
-- Antigravity IDE installed and running
-- Account directories exist in `~/.gemini/antigravity/` or `~/.gemini/techgravity/`
-
-#### Enabling Antigravity Usage
-
-```bash
-# In your .env file
-ENABLE_ANTIGRAVITY=1
-```
-
-No additional configuration required.
-
-#### Dashboard API
-
-| Endpoint | Method | Description |
-|----------|--------|-------------|
-| `/dashboard/api/antigravity/available` | GET | Check if Antigravity accounts exist |
-| `/dashboard/api/antigravity/summary` | GET | Get full usage summary |
-| `/dashboard/api/antigravity/refresh` | POST | Force refresh cached data |
-
-#### Response Format
-
-```json
-{
-  "status": {
-    "isRunning": true,
-    "processId": 12345,
-    "port": 64446,
-    "accounts": [
-      {
-        "accountId": "antigravity",
-        "accountName": "Antigravity",
-        "accountEmail": "user@example.com",
-        "planName": "Pro",
-        "monthlyPromptCredits": 500,
-        "availablePromptCredits": 450,
-        "models": [
-          {
-            "modelId": "gemini-3-pro-high",
-            "label": "Gemini 3 Pro (High)",
-            "remainingPercentage": 85,
-            "isExhausted": false,
-            "timeUntilReset": "4h 30m"
-          },
-          {
-            "modelId": "claude-sonnet-4.5",
-            "label": "Claude Sonnet 4.5",
-            "remainingPercentage": 60,
-            "isExhausted": false
-          }
-        ]
-      }
-    ]
-  },
-  "conversationStats": {
-    "primary": {
-      "totalConversations": 150,
-      "totalSizeBytes": 25000000,
-      "formattedSize": "23.8 MB",
-      "recentConversations": 25
-    }
-  },
-  "brainStats": {
-    "primary": {
-      "totalTasks": 12,
-      "totalSizeBytes": 5000000
-    }
-  }
-}
-```
-
-#### Dashboard
-
-When enabled, an **Antigravity** tab appears showing:
-- Running status indicator (green = active)
-- Per-account quota bars for each model
-- Remaining percentage with color coding (green/yellow/red)
-- Time until quota reset
-- Conversation and task statistics
-- Multi-account support (Antigravity + Techgravity)
-
----
-
-### Enabling All Features
-
-For personal/development use, enable everything:
-
-```bash
-# .env file
-
-# Core settings
-PORT=3010
-LOG_LEVEL=info
-
-# Enable all optional features
-ENABLE_SKILLS=1
-ENABLE_CIPHER=1
-ENABLE_ANTIGRAVITY=1
-ENABLE_CLAUDE_USAGE=1
-
-# Show all gateway tools (not just lite mode subset)
-GATEWAY_LITE_MODE=0
-
-# Cipher/Qdrant settings (if using Cipher)
-CIPHER_API_URL=http://localhost:8082
-QDRANT_URL=https://your-qdrant.cloud
-QDRANT_API_KEY=your-api-key
-QDRANT_COLLECTION=cipher_knowledge
-```
-
-Then restart the gateway:
-
-```bash
-npm run build && npm start
-```
-
-All four tabs will now appear in the dashboard at `http://localhost:3010/dashboard`.
-
----
+The dashboard no longer includes Helper Agents, Claude Usage, or Antigravity AI Limits tabs. The old local usage parsers and quota APIs were removed to keep the gateway focused on MCP server management, skills, and Chronicle-backed memory.
 
 ## Health Check
 

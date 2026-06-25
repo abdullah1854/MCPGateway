@@ -256,16 +256,14 @@ export function getDashboardHTML(): string {
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Instrument+Sans:wght@400;500;600;700&family=IBM+Plex+Mono:wght@400;500;600&display=swap" rel="stylesheet">
-  <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
   <style>
     :root {
-      /* Obsidian Observatory - Deep obsidian with warm amber-gold */
-      --bg-primary: #0A0A0C;
-      --bg-secondary: rgba(14, 14, 18, 0.98);
-      --bg-tertiary: rgba(20, 20, 26, 0.95);
-      --bg-card: rgba(16, 16, 22, 0.92);
-      --bg-glass: rgba(255, 255, 255, 0.025);
-      --bg-elevated: rgba(26, 26, 34, 0.95);
+      --bg-primary: #101114;
+      --bg-secondary: #15171c;
+      --bg-tertiary: #1b1e25;
+      --bg-card: #181b21;
+      --bg-glass: #20242b;
+      --bg-elevated: #222730;
 
       /* Accent colors - amber-gold primary, steel blue secondary */
       --accent: #E2A93B;
@@ -283,14 +281,14 @@ export function getDashboardHTML(): string {
       --error-glow: rgba(248, 113, 113, 0.25);
 
       /* Text hierarchy - tuned for stronger readability */
-      --text-primary: #F5F0E8;
-      --text-secondary: #C5BEB7;
-      --text-muted: #9E968E;
-      --text-dimmed: #777067;
+      --text-primary: #F7F4EF;
+      --text-secondary: #D8D1C8;
+      --text-muted: #B2AAA0;
+      --text-dimmed: #8D857C;
 
       /* Borders - warm undertone */
-      --border: rgba(226, 169, 59, 0.08);
-      --border-hover: rgba(226, 169, 59, 0.18);
+      --border: rgba(255, 255, 255, 0.1);
+      --border-hover: rgba(226, 169, 59, 0.32);
       --border-active: rgba(226, 169, 59, 0.5);
 
       /* Gradients - amber-gold + steel blue */
@@ -356,13 +354,10 @@ export function getDashboardHTML(): string {
       right: 0;
       bottom: 0;
       background:
-        radial-gradient(ellipse 80% 50% at 50% -20%, rgba(226, 169, 59, 0.08), transparent),
-        radial-gradient(ellipse 60% 40% at 100% 0%, rgba(91, 141, 239, 0.06), transparent),
-        radial-gradient(ellipse 50% 30% at 0% 100%, rgba(226, 91, 124, 0.04), transparent);
+        linear-gradient(180deg, rgba(226, 169, 59, 0.08), transparent 22rem),
+        linear-gradient(135deg, rgba(91, 141, 239, 0.08), transparent 32rem);
       pointer-events: none;
       z-index: -2;
-      /* Subtle grain texture */
-      filter: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg'%3E%3Cfilter id='g'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.65' numOctaves='3' stitchTiles='stitch'/%3E%3CfeColorMatrix type='saturate' values='0'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23g)' opacity='0.03'/%3E%3C/svg%3E#g");
     }
     
     .container {
@@ -1398,227 +1393,6 @@ export function getDashboardHTML(): string {
       display: block;
     }
 
-    /* Claude Usage Section */
-    .usage-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-      gap: 1rem;
-      margin-bottom: 2rem;
-    }
-
-    .usage-stat {
-      background: var(--bg-card);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      padding: 1.25rem;
-      border-radius: 16px;
-      border: 1px solid var(--border);
-      position: relative;
-      overflow: hidden;
-    }
-
-    .usage-stat::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 3px;
-      background: var(--gradient-1);
-    }
-
-    .usage-stat.success::before {
-      background: var(--success);
-    }
-
-    .usage-stat.warning::before {
-      background: var(--warning);
-    }
-
-    .usage-stat-value {
-      font-size: 1.75rem;
-      font-weight: 700;
-      background: var(--gradient-1);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-      line-height: 1.2;
-    }
-
-    .usage-stat-value.large {
-      font-size: 2.25rem;
-    }
-
-    .usage-stat-label {
-      font-size: 0.75rem;
-      color: var(--text-muted);
-      text-transform: uppercase;
-      letter-spacing: 0.1em;
-      font-weight: 500;
-      margin-top: 0.5rem;
-    }
-
-    .usage-stat-sublabel {
-      font-size: 0.8rem;
-      color: var(--text-secondary);
-      margin-top: 0.25rem;
-    }
-
-    .charts-grid {
-      display: grid;
-      grid-template-columns: 2fr 1fr;
-      gap: 1.5rem;
-      margin-bottom: 2rem;
-    }
-
-    @media (max-width: 1200px) {
-      .charts-grid {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .chart-card {
-      background: var(--bg-card);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      padding: 1.5rem;
-      border-radius: 20px;
-      border: 1px solid var(--border);
-    }
-
-    .chart-card h3 {
-      font-size: 1rem;
-      font-weight: 600;
-      margin-bottom: 1rem;
-      color: var(--text-primary);
-    }
-
-    .chart-container {
-      position: relative;
-      height: 300px;
-    }
-
-    .top-days-list {
-      list-style: none;
-      padding: 0;
-      margin: 0;
-    }
-
-    .top-days-list li {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      padding: 0.75rem 0;
-      border-bottom: 1px solid var(--border);
-    }
-
-    .top-days-list li:last-child {
-      border-bottom: none;
-    }
-
-    .top-day-date {
-      font-size: 0.9rem;
-      color: var(--text-secondary);
-    }
-
-    .top-day-cost {
-      font-size: 0.95rem;
-      font-weight: 600;
-      color: var(--accent);
-    }
-
-    .model-breakdown {
-      margin-top: 1rem;
-    }
-
-    .model-item {
-      display: flex;
-      align-items: center;
-      gap: 0.75rem;
-      margin-bottom: 0.75rem;
-    }
-
-    .model-color {
-      width: 12px;
-      height: 12px;
-      border-radius: 3px;
-    }
-
-    .model-name {
-      flex: 1;
-      font-size: 0.85rem;
-      color: var(--text-secondary);
-    }
-
-    .model-cost {
-      font-size: 0.85rem;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-
-    .model-percent {
-      font-size: 0.8rem;
-      color: var(--text-muted);
-      min-width: 45px;
-      text-align: right;
-    }
-
-    .live-session {
-      background: linear-gradient(135deg, rgba(226, 169, 59, 0.08), rgba(91, 141, 239, 0.06));
-      border: 1px solid rgba(226, 169, 59, 0.25);
-      border-radius: 16px;
-      padding: 1.25rem;
-      margin-bottom: 1.5rem;
-      display: flex;
-      align-items: center;
-      gap: 1rem;
-    }
-
-    .live-indicator {
-      width: 10px;
-      height: 10px;
-      background: var(--success);
-      border-radius: 50%;
-      animation: pulse 2s infinite;
-    }
-
-    .live-session-info {
-      flex: 1;
-    }
-
-    .live-session-title {
-      font-size: 0.9rem;
-      font-weight: 600;
-      color: var(--text-primary);
-    }
-
-    .live-session-meta {
-      font-size: 0.8rem;
-      color: var(--text-muted);
-      margin-top: 0.25rem;
-    }
-
-    .live-session-cost {
-      font-size: 1.25rem;
-      font-weight: 700;
-      color: var(--accent);
-    }
-
-    .usage-loading {
-      text-align: center;
-      padding: 3rem;
-      color: var(--text-muted);
-    }
-
-    .usage-error {
-      text-align: center;
-      padding: 2rem;
-      color: var(--error);
-      background: rgba(248, 113, 113, 0.1);
-      border-radius: 12px;
-      border: 1px solid var(--error);
-    }
-
     .refresh-btn {
       background: var(--bg-glass);
       border: 1px solid var(--border);
@@ -1645,6 +1419,24 @@ export function getDashboardHTML(): string {
       align-items: center;
       gap: 0.5rem;
       flex-wrap: wrap;
+    }
+
+    .date-input {
+      min-height: 38px;
+      padding: 0.55rem 0.75rem;
+      color-scheme: dark;
+      color: var(--text-primary);
+      background: var(--bg-glass);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font: inherit;
+      font-size: 0.85rem;
+    }
+
+    .date-input:focus {
+      outline: none;
+      border-color: var(--accent);
+      box-shadow: 0 0 0 3px var(--accent-glow);
     }
 
     /* Memory Tab Styles */
@@ -1848,6 +1640,14 @@ export function getDashboardHTML(): string {
       color: var(--text-primary);
     }
 
+    .memory-detail-markdown {
+      white-space: pre-wrap;
+      word-break: break-word;
+      line-height: 1.65;
+      color: var(--text-secondary);
+      font-size: 0.92rem;
+    }
+
     #memory-detail-content {
       flex: 1;
       overflow-y: auto;
@@ -1933,24 +1733,6 @@ export function getDashboardHTML(): string {
       line-height: 1.5;
     }
 
-    /* AI Limits Tab Styles */
-    .ai-limits-frame-wrapper {
-      position: relative;
-      width: 100%;
-      height: calc(100vh - 70px);
-      border-radius: 12px;
-      overflow: hidden;
-      border: 1px solid var(--border);
-      background: #0d1219;
-    }
-
-    .ai-limits-iframe {
-      width: 100%;
-      height: 100%;
-      border: none;
-      background: #0d1219;
-    }
-
     /* Skills Tab Styles */
     .skills-actions {
       display: flex;
@@ -1996,176 +1778,6 @@ export function getDashboardHTML(): string {
       letter-spacing: 0.08em;
       font-weight: 500;
       margin-top: 0.25rem;
-    }
-
-    /* Helper Agents Tab */
-    .helper-router-status {
-      border: 1px solid var(--border);
-      background: var(--bg-card);
-      border-radius: 14px;
-      padding: 1rem 1.2rem;
-      margin-bottom: 1rem;
-    }
-
-    .helper-router-status.connected {
-      border-color: rgba(52, 211, 153, 0.45);
-    }
-
-    .helper-router-status.warning {
-      border-color: rgba(251, 191, 36, 0.5);
-    }
-
-    .helper-router-meta {
-      color: var(--text-secondary);
-      font-size: 0.9rem;
-      margin-top: 0.45rem;
-    }
-
-    .helper-test-panel {
-      border: 1px solid var(--border);
-      background: var(--bg-card);
-      border-radius: 14px;
-      padding: 1rem;
-      margin-bottom: 1rem;
-    }
-
-    .helper-test-row {
-      display: grid;
-      grid-template-columns: 180px 1fr;
-      gap: 0.75rem;
-      align-items: center;
-      margin-bottom: 0.75rem;
-    }
-
-    .helper-test-row label {
-      color: var(--text-muted);
-      font-size: 0.82rem;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      font-weight: 600;
-    }
-
-    .helper-test-row select,
-    .helper-test-row textarea {
-      width: 100%;
-      border-radius: 10px;
-      border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.03);
-      color: var(--text-primary);
-      padding: 0.6rem 0.7rem;
-      font-size: 0.9rem;
-      font-family: inherit;
-    }
-
-    .helper-test-row textarea {
-      min-height: 88px;
-      resize: vertical;
-      line-height: 1.45;
-    }
-
-    .helper-test-output {
-      margin-top: 0.8rem;
-      border: 1px solid var(--border);
-      border-radius: 10px;
-      padding: 0.75rem;
-      background: rgba(0, 0, 0, 0.22);
-      color: var(--text-secondary);
-      max-height: 320px;
-      overflow: auto;
-      font-size: 0.82rem;
-      line-height: 1.45;
-      white-space: pre-wrap;
-      word-break: break-word;
-      font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace;
-    }
-
-    @media (max-width: 880px) {
-      .helper-test-row {
-        grid-template-columns: 1fr;
-      }
-    }
-
-    .helper-agent-grid {
-      display: grid;
-      grid-template-columns: repeat(auto-fit, minmax(260px, 1fr));
-      gap: 1rem;
-    }
-
-    .helper-agent-card {
-      background: var(--bg-card);
-      border: 1px solid var(--border);
-      border-radius: 14px;
-      padding: 1rem;
-      transition: border-color 0.2s ease, transform 0.2s ease;
-    }
-
-    .helper-agent-card:hover {
-      border-color: var(--border-hover);
-      transform: translateY(-2px);
-    }
-
-    .helper-agent-head {
-      display: flex;
-      justify-content: space-between;
-      align-items: center;
-      margin-bottom: 0.5rem;
-    }
-
-    .helper-agent-title {
-      font-weight: 700;
-      color: var(--text-primary);
-      font-size: 1rem;
-    }
-
-    .helper-agent-status {
-      font-size: 0.72rem;
-      letter-spacing: 0.04em;
-      text-transform: uppercase;
-      padding: 0.2rem 0.55rem;
-      border-radius: 999px;
-      border: 1px solid var(--border);
-      color: var(--text-muted);
-      background: rgba(255, 255, 255, 0.03);
-    }
-
-    .helper-agent-status.available {
-      color: var(--success);
-      border-color: rgba(52, 211, 153, 0.45);
-      background: rgba(52, 211, 153, 0.12);
-    }
-
-    .helper-agent-specialization {
-      color: var(--text-secondary);
-      line-height: 1.45;
-      font-size: 0.9rem;
-      margin-bottom: 0.85rem;
-    }
-
-    .helper-agent-section {
-      margin-bottom: 0.75rem;
-    }
-
-    .helper-agent-label {
-      color: var(--text-muted);
-      text-transform: uppercase;
-      font-size: 0.68rem;
-      letter-spacing: 0.08em;
-      margin-bottom: 0.45rem;
-    }
-
-    .helper-agent-tags {
-      display: flex;
-      gap: 0.4rem;
-      flex-wrap: wrap;
-    }
-
-    .helper-agent-tag {
-      border: 1px solid var(--border);
-      background: rgba(255, 255, 255, 0.03);
-      border-radius: 999px;
-      padding: 0.2rem 0.55rem;
-      font-size: 0.78rem;
-      color: var(--text-secondary);
     }
 
     .skills-categories-grid {
@@ -3303,21 +2915,9 @@ export function getDashboardHTML(): string {
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect><line x1="6" y1="6" x2="6.01" y2="6"></line><line x1="6" y1="18" x2="6.01" y2="18"></line></svg>
         Servers & Tools
       </button>
-      <button class="tab-btn" data-tab="helpers" id="tab-btn-helpers" role="tab" aria-selected="false" aria-controls="tab-helpers" tabindex="-1" onclick="switchTab('helpers')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M16 11a4 4 0 1 0-8 0"></path><circle cx="12" cy="7" r="3"></circle><path d="M3 21c0-3.3 2.7-6 6-6"></path><path d="M21 21c0-3.3-2.7-6-6-6"></path><path d="M12 13v8"></path></svg>
-        Helper Agents
-      </button>
       <button class="tab-btn" data-tab="memory" id="tab-btn-memory" role="tab" aria-selected="false" aria-controls="tab-memory" tabindex="-1" onclick="switchTab('memory')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"></circle><path d="M12 8v4l3 3"></path></svg>
         Memory
-      </button>
-      <button class="tab-btn" data-tab="usage" id="tab-btn-usage" role="tab" aria-selected="false" aria-controls="tab-usage" tabindex="-1" onclick="switchTab('usage')">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><line x1="12" y1="20" x2="12" y2="10"></line><line x1="18" y1="20" x2="18" y2="4"></line><line x1="6" y1="20" x2="6" y2="16"></line></svg>
-        Claude Usage
-      </button>
-      <button class="tab-btn" data-tab="antigravity" onclick="switchTab('antigravity')" id="antigravity-tab-btn" role="tab" aria-selected="false" aria-controls="tab-antigravity" tabindex="-1" style="display: none;">
-        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M22 12h-4l-3 9L9 3l-3 9H2"></path></svg>
-        AI Limits
       </button>
       <button class="tab-btn" data-tab="skills" id="tab-btn-skills" role="tab" aria-selected="false" aria-controls="tab-skills" tabindex="-1" onclick="switchTab('skills')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
@@ -3360,17 +2960,17 @@ export function getDashboardHTML(): string {
           </div>
         </div>
 
-        <!-- Recent Memories Card -->
+        <!-- Daily Chronicle Card -->
         <div class="overview-card">
           <div class="overview-card-header">
             <div class="overview-card-title">
               <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path><polyline points="3.27 6.96 12 12.01 20.73 6.96"></polyline><line x1="12" y1="22.08" x2="12" y2="12"></line></svg>
-              Recent Memories
+              Daily Chronicle
             </div>
           </div>
           <div class="overview-card-content">
             <div class="activity-list" id="recent-memories-list">
-              <div class="overview-empty">Loading memories...</div>
+              <div class="overview-empty">Loading Chronicle summaries...</div>
             </div>
           </div>
         </div>
@@ -3389,21 +2989,13 @@ export function getDashboardHTML(): string {
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><rect x="2" y="2" width="20" height="8" rx="2" ry="2"></rect><rect x="2" y="14" width="20" height="8" rx="2" ry="2"></rect></svg>
                 Manage Servers
               </button>
-              <button class="quick-action-btn" onclick="switchTab('helpers')">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path d="M16 11a4 4 0 1 0-8 0"></path><circle cx="12" cy="7" r="3"></circle><path d="M3 21c0-3.3 2.7-6 6-6"></path><path d="M21 21c0-3.3-2.7-6-6-6"></path><path d="M12 13v8"></path></svg>
-                Helper Agents
-              </button>
               <button class="quick-action-btn" onclick="switchTab('skills')">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline></svg>
                 Browse Skills
               </button>
               <button class="quick-action-btn" onclick="switchTab('memory')">
                 <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><circle cx="12" cy="12" r="10"></circle><path d="M12 8v4l3 3"></path></svg>
-                View Memory
-              </button>
-              <button class="quick-action-btn" onclick="switchTab('usage')">
-                <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="20" x2="12" y2="10"></line><line x1="18" y1="20" x2="18" y2="4"></line><line x1="6" y1="20" x2="6" y2="16"></line></svg>
-                Usage Stats
+                Chronicle Memory
               </button>
             </div>
           </div>
@@ -3460,31 +3052,6 @@ export function getDashboardHTML(): string {
           </div>
         </div>
 
-        <!-- Usage Summary Card -->
-        <div class="overview-card">
-          <div class="overview-card-header">
-            <div class="overview-card-title">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><line x1="12" y1="20" x2="12" y2="10"></line><line x1="18" y1="20" x2="18" y2="4"></line><line x1="6" y1="20" x2="6" y2="16"></line></svg>
-              Usage Today
-            </div>
-          </div>
-          <div class="overview-card-content" id="usage-summary">
-            <div class="health-list">
-              <div class="health-item">
-                <div class="health-item-name">API Calls</div>
-                <span class="health-item-tools" id="usage-api-calls">--</span>
-              </div>
-              <div class="health-item">
-                <div class="health-item-name">Input Tokens</div>
-                <span class="health-item-tools" id="usage-input-tokens">--</span>
-              </div>
-              <div class="health-item">
-                <div class="health-item-name">Output Tokens</div>
-                <span class="health-item-tools" id="usage-output-tokens">--</span>
-              </div>
-            </div>
-          </div>
-        </div>
       </div>
     </div>
 
@@ -3520,71 +3087,15 @@ export function getDashboardHTML(): string {
       </div>
     </div>
 
-    <!-- Helper Agents Tab -->
-    <div id="tab-helpers" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-helpers" hidden>
-      <div class="section-header">
-        <div>
-          <div class="section-title">Helper Agents</div>
-          <div class="section-subtitle">Team-of-agents routing view for Kimi, Minimax, Z.AI, and Codex CLI under the multi-model router.</div>
-        </div>
-        <button class="refresh-btn" onclick="refreshHelperAgents()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
-          Refresh
-        </button>
-      </div>
-
-      <div class="skills-stats-row" id="helper-agents-stats">
-        <div class="loading">Loading helper agent stats...</div>
-      </div>
-
-      <div id="helper-router-status" class="helper-router-status warning">
-        Loading router status...
-      </div>
-
-      <div class="helper-test-panel">
-        <div class="helper-test-row">
-          <label for="helper-test-task-type">Task Type</label>
-          <select id="helper-test-task-type">
-            <option value="file-editing" selected>file-editing</option>
-            <option value="research">research</option>
-            <option value="analysis">analysis</option>
-            <option value="creative">creative</option>
-            <option value="translation">translation</option>
-            <option value="summarization">summarization</option>
-            <option value="long-context">long-context</option>
-            <option value="fast">fast</option>
-            <option value="cheap">cheap</option>
-            <option value="general">general</option>
-          </select>
-        </div>
-        <div class="helper-test-row">
-          <label for="helper-test-prompt">Test Prompt</label>
-          <textarea id="helper-test-prompt">Run a no-op helper route smoke test. Do not make any file changes. Reply with one sentence containing OK and the working directory you would use.</textarea>
-        </div>
-        <div style="display:flex; justify-content:flex-end; gap:0.6rem;">
-          <button class="btn btn-secondary" onclick="resetHelperAgentTestPrompt()">
-            Reset Prompt
-          </button>
-          <button class="btn btn-success" onclick="runHelperAgentTestRoute()">
-            Run Test Route
-          </button>
-        </div>
-        <div id="helper-test-output" class="helper-test-output">No test run yet.</div>
-      </div>
-
-      <div id="helper-agents-grid" class="helper-agent-grid">
-        <div class="loading">Loading helper agents...</div>
-      </div>
-    </div>
-
     <!-- Memory Tab -->
     <div id="tab-memory" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-memory" hidden>
       <div class="section-header">
         <div>
-          <div class="section-title">Cipher Memory</div>
-          <div class="section-subtitle">Persistent AI memory across all IDEs - decisions, learnings, patterns, and insights.</div>
+          <div class="section-title">Chronicle Daily Memory</div>
+          <div class="section-subtitle">Daily screen-context summaries from Chronicle, grouped by date and refreshed from local memory files.</div>
         </div>
         <div class="memory-actions">
+          <input type="date" id="chronicle-date" class="date-input" />
           <button class="refresh-btn" onclick="refreshMemoryData()">
             <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
             Refresh
@@ -3592,27 +3103,16 @@ export function getDashboardHTML(): string {
         </div>
       </div>
 
-      <!-- Memory Search -->
-      <div class="memory-search-container">
-        <div class="search-box memory-search">
-          <input type="text" id="memory-search" placeholder="Search memories (decisions, learnings, patterns)..." />
-        </div>
-        <button class="btn btn-primary" onclick="searchMemory()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="11" cy="11" r="8"></circle><line x1="21" y1="21" x2="16.65" y2="16.65"></line></svg>
-          Search
-        </button>
-      </div>
-
       <!-- Memory Stats -->
       <div id="memory-stats-container">
-        <div class="memory-loading">Connecting to Cipher Memory...</div>
+        <div class="memory-loading">Loading Chronicle daily memory...</div>
       </div>
 
       <!-- Memory Sessions -->
       <div class="memory-sessions-section">
-        <div class="section-title" style="margin-bottom: 1rem;">Memory Sessions</div>
+        <div class="section-title" style="margin-bottom: 1rem;">Daily Summaries</div>
         <div id="memory-sessions-container">
-          <div class="memory-loading">Loading sessions...</div>
+          <div class="memory-loading">Loading Chronicle summaries...</div>
         </div>
       </div>
 
@@ -3625,38 +3125,6 @@ export function getDashboardHTML(): string {
           </button>
         </div>
         <div id="memory-detail-content"></div>
-      </div>
-    </div>
-
-    <!-- Claude Usage Tab -->
-    <div id="tab-usage" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-usage" hidden>
-      <div class="section-header">
-        <div>
-          <div class="section-title">Claude Code Usage Analytics</div>
-          <div class="section-subtitle">Track your Claude API usage, costs, and efficiency metrics.</div>
-        </div>
-        <button class="refresh-btn" onclick="refreshUsageData()">
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
-          Refresh
-        </button>
-      </div>
-
-      <!-- Live Session -->
-      <div id="live-session-container"></div>
-
-      <!-- Usage Stats -->
-      <div id="usage-stats-container">
-        <div class="usage-loading">Loading usage data...</div>
-      </div>
-
-      <!-- Charts -->
-      <div id="usage-charts-container"></div>
-    </div>
-
-    <!-- AI Limits Tab -->
-    <div id="tab-antigravity" class="tab-content" role="tabpanel" aria-labelledby="antigravity-tab-btn" hidden>
-      <div class="ai-limits-frame-wrapper">
-        <iframe id="ai-limits-iframe" src="http://localhost:3011?embed=1" class="ai-limits-iframe" loading="lazy"></iframe>
       </div>
     </div>
 
@@ -3932,7 +3400,6 @@ export function getDashboardHTML(): string {
   <script>
     let backends = [];
     let tools = [];
-    let helperAgentsData = null;
     let searchQuery = '';
     let selectedBackend = null;
     let expandedBackends = new Set();
@@ -3958,213 +3425,8 @@ export function getDashboardHTML(): string {
         updateStats();
         renderBackends();
         renderFilters();
-        if (currentTab === 'helpers' && helperAgentsData) {
-          await loadHelperAgents();
-        }
       } catch (err) {
         console.error('Failed to load data:', err);
-      }
-    }
-
-    function formatTaskTypeLabel(taskType) {
-      return taskType
-        .replace(/-/g, ' ')
-        .replace(/\\b\\w/g, c => c.toUpperCase());
-    }
-
-    function renderHelperAgents() {
-      const statsContainer = document.getElementById('helper-agents-stats');
-      const routerContainer = document.getElementById('helper-router-status');
-      const gridContainer = document.getElementById('helper-agents-grid');
-
-      if (!statsContainer || !routerContainer || !gridContainer || !helperAgentsData) {
-        return;
-      }
-
-      const agents = helperAgentsData.agents || [];
-      const availableCount = agents.filter(agent => agent.availability === 'available').length;
-      const unavailableCount = agents.length - availableCount;
-      const uniqueTaskTypes = Array.from(
-        new Set(agents.flatMap(agent => agent.primaryTaskTypes || [])),
-      );
-
-      statsContainer.innerHTML = \`
-        <div class="skills-stat">
-          <div class="skills-stat-value">\${agents.length}</div>
-          <div class="skills-stat-label">Helper Agents</div>
-        </div>
-        <div class="skills-stat">
-          <div class="skills-stat-value">\${availableCount}</div>
-          <div class="skills-stat-label">Available</div>
-        </div>
-        <div class="skills-stat">
-          <div class="skills-stat-value">\${unavailableCount}</div>
-          <div class="skills-stat-label">Unavailable</div>
-        </div>
-        <div class="skills-stat">
-          <div class="skills-stat-value">\${uniqueTaskTypes.length}</div>
-          <div class="skills-stat-label">Task Types</div>
-        </div>
-      \`;
-
-      const router = helperAgentsData.router || {};
-      const missingTools = router.missingTools || [];
-      const availableTools = router.availableTools || [];
-      const routerConnected = router.availability === 'connected';
-
-      routerContainer.className = \`helper-router-status \${routerConnected ? 'connected' : 'warning'}\`;
-      routerContainer.innerHTML = \`
-        <div style="display:flex; justify-content:space-between; align-items:center; gap:1rem; flex-wrap:wrap;">
-          <div style="font-weight:700; color: var(--text-primary);">Router Backend: \${escapeHtml(router.id || 'multi-model-router')}</div>
-          <span class="helper-agent-status \${routerConnected ? 'available' : ''}">
-            \${escapeHtml(router.availability || 'unknown')}
-          </span>
-        </div>
-        <div class="helper-router-meta">
-          Status: <strong>\${escapeHtml(router.status || 'unknown')}</strong> ·
-          Prefix: <code>\${escapeHtml(router.toolPrefix || 'multi_')}</code> ·
-          Tools: \${availableTools.length}
-        </div>
-        \${missingTools.length > 0
-          ? \`<div class="helper-router-meta">Missing tools: <code>\${missingTools.map(escapeHtml).join('</code>, <code>')}</code></div>\`
-          : '<div class="helper-router-meta">All required routing tools are available.</div>'
-        }
-      \`;
-
-      gridContainer.innerHTML = agents.map(agent => {
-        const primaryTags = (agent.primaryTaskTypes || [])
-          .map(taskType => \`<span class="helper-agent-tag">\${escapeHtml(formatTaskTypeLabel(taskType))}</span>\`)
-          .join('');
-        const fallbackTags = (agent.fallbackTaskTypes || [])
-          .map(taskType => \`<span class="helper-agent-tag">\${escapeHtml(formatTaskTypeLabel(taskType))}</span>\`)
-          .join('');
-        const modelTags = (agent.defaultModels || [])
-          .map(modelId => \`<span class="helper-agent-tag">\${escapeHtml(modelId)}</span>\`)
-          .join('');
-
-        return \`
-          <div class="helper-agent-card">
-            <div class="helper-agent-head">
-              <div class="helper-agent-title">\${escapeHtml(agent.displayName || agent.id)}</div>
-              <span class="helper-agent-status \${agent.availability === 'available' ? 'available' : ''}">
-                \${escapeHtml(agent.availability || 'unknown')}
-              </span>
-            </div>
-            <div class="helper-agent-specialization">\${escapeHtml(agent.specialization || '')}</div>
-            <div class="helper-agent-section">
-              <div class="helper-agent-label">Primary Task Types</div>
-              <div class="helper-agent-tags">\${primaryTags || '<span class="helper-agent-tag">None</span>'}</div>
-            </div>
-            <div class="helper-agent-section">
-              <div class="helper-agent-label">Fallback Task Types</div>
-              <div class="helper-agent-tags">\${fallbackTags || '<span class="helper-agent-tag">None</span>'}</div>
-            </div>
-            <div class="helper-agent-section">
-              <div class="helper-agent-label">Default Models</div>
-              <div class="helper-agent-tags">\${modelTags || '<span class="helper-agent-tag">N/A</span>'}</div>
-            </div>
-            <div class="helper-agent-label">Route</div>
-            <div style="color: var(--text-secondary); font-size: 0.85rem;"><code>\${escapeHtml(agent.routeMethod || 'multi_route_task(...)')}</code></div>
-          </div>
-        \`;
-      }).join('');
-    }
-
-    async function loadHelperAgents() {
-      const statsContainer = document.getElementById('helper-agents-stats');
-      const routerContainer = document.getElementById('helper-router-status');
-      const gridContainer = document.getElementById('helper-agents-grid');
-
-      if (statsContainer) {
-        statsContainer.innerHTML = '<div class="loading">Loading helper agent stats...</div>';
-      }
-      if (routerContainer) {
-        routerContainer.className = 'helper-router-status warning';
-        routerContainer.textContent = 'Loading router status...';
-      }
-      if (gridContainer) {
-        gridContainer.innerHTML = '<div class="loading">Loading helper agents...</div>';
-      }
-
-      try {
-        const res = await fetch('/dashboard/api/helper-agents');
-        if (!res.ok) {
-          throw new Error(\`API returned \${res.status}\`);
-        }
-        helperAgentsData = await res.json();
-        renderHelperAgents();
-      } catch (err) {
-        console.error('Failed to load helper agents:', err);
-        if (statsContainer) {
-          statsContainer.innerHTML = '<div class="overview-empty">Failed to load helper agent stats</div>';
-        }
-        if (routerContainer) {
-          routerContainer.className = 'helper-router-status warning';
-          routerContainer.innerHTML = '<div class="overview-empty">Failed to load router status</div>';
-        }
-        if (gridContainer) {
-          gridContainer.innerHTML = '<div class="overview-empty">Failed to load helper agents</div>';
-        }
-      }
-    }
-
-    function refreshHelperAgents() {
-      helperAgentsData = null;
-      loadHelperAgents();
-      showToast('Refreshing helper agents...');
-    }
-
-    function resetHelperAgentTestPrompt() {
-      const promptEl = document.getElementById('helper-test-prompt');
-      if (!promptEl) return;
-      promptEl.value = 'Run a no-op helper route smoke test. Do not make any file changes. Reply with one sentence containing OK and the working directory you would use.';
-      showToast('Test prompt reset');
-    }
-
-    async function runHelperAgentTestRoute() {
-      const taskTypeEl = document.getElementById('helper-test-task-type');
-      const promptEl = document.getElementById('helper-test-prompt');
-      const outputEl = document.getElementById('helper-test-output');
-
-      if (!taskTypeEl || !promptEl || !outputEl) {
-        showToast('Helper test controls not available', true);
-        return;
-      }
-
-      const taskType = taskTypeEl.value;
-      const prompt = promptEl.value.trim();
-      if (!prompt) {
-        showToast('Enter a prompt before running test route', true);
-        return;
-      }
-
-      outputEl.textContent = 'Running multi_route_task...';
-      try {
-        const res = await fetch('/api/code/tools/multi_route_task/call', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            args: {
-              taskType,
-              prompt,
-              maxTokens: 400,
-            },
-            smart: false,
-          }),
-        });
-
-        const data = await res.json();
-        if (!res.ok || !data.success) {
-          const errorMessage = data?.error || data?.message || ('HTTP ' + res.status);
-          throw new Error(errorMessage);
-        }
-
-        outputEl.textContent = JSON.stringify(data.result, null, 2);
-        showToast('Helper route test completed');
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err);
-        outputEl.textContent = 'Error: ' + message;
-        showToast('Helper route test failed', true);
       }
     }
     
@@ -4922,13 +4184,13 @@ export function getDashboardHTML(): string {
     // ==========================================
     // Feature Flags (Optional Features)
     // ==========================================
-    let featureFlags = { skills: false, cipher: false, antigravity: false, claudeUsage: false };
+    let featureFlags = { skills: false, chronicle: true };
 
     async function loadFeatureFlags() {
       try {
         const res = await fetch('/dashboard/api/feature-flags');
         const data = await res.json();
-        featureFlags = data.features || { skills: false, cipher: false, antigravity: false, claudeUsage: false };
+        featureFlags = { skills: false, chronicle: true, ...(data.features || {}) };
         applyFeatureFlags();
       } catch (err) {
         console.warn('Failed to load feature flags, using defaults:', err);
@@ -4941,34 +4203,20 @@ export function getDashboardHTML(): string {
       const memoryTab = document.getElementById('tab-memory');
       const skillsTabBtn = document.querySelector('[onclick="switchTab(\\'skills\\')"]');
       const skillsTab = document.getElementById('tab-skills');
-      const antigravityTabBtn = document.getElementById('antigravity-tab-btn');
-      const antigravityTab = document.getElementById('tab-antigravity');
-      const usageTabBtn = document.querySelector('[onclick="switchTab(\\'usage\\')"]');
-      const usageTab = document.getElementById('tab-usage');
 
-      // Memory (Cipher) tab
-      if (memoryTabBtn) memoryTabBtn.style.display = featureFlags.cipher ? '' : 'none';
-      if (memoryTab) memoryTab.style.display = featureFlags.cipher ? '' : 'none';
+      // Memory is Chronicle-backed and intentionally always visible.
+      if (memoryTabBtn) memoryTabBtn.style.display = '';
+      if (memoryTab) memoryTab.style.display = '';
 
       // Skills tab
       if (skillsTabBtn) skillsTabBtn.style.display = featureFlags.skills ? '' : 'none';
       if (skillsTab) skillsTab.style.display = featureFlags.skills ? '' : 'none';
 
-      // AI Limits tab
-      if (antigravityTabBtn) antigravityTabBtn.style.display = featureFlags.antigravity ? '' : 'none';
-      if (antigravityTab) antigravityTab.style.display = featureFlags.antigravity ? '' : 'none';
-
-      // Claude Usage tab
-      if (usageTabBtn) usageTabBtn.style.display = featureFlags.claudeUsage ? '' : 'none';
-      if (usageTab) usageTab.style.display = featureFlags.claudeUsage ? '' : 'none';
-
       // Hide overview cards for disabled features
       const recentMemoriesCard = document.querySelector('.overview-card:has(#recent-memories-list)');
       const topSkillsCard = document.querySelector('.overview-card:has(#top-skills-list)');
-      const usageSummaryCard = document.querySelector('.overview-card:has(#usage-summary)');
-      if (recentMemoriesCard) recentMemoriesCard.style.display = featureFlags.cipher ? '' : 'none';
+      if (recentMemoriesCard) recentMemoriesCard.style.display = '';
       if (topSkillsCard) topSkillsCard.style.display = featureFlags.skills ? '' : 'none';
-      if (usageSummaryCard) usageSummaryCard.style.display = featureFlags.claudeUsage ? '' : 'none';
     }
 
     // Load feature flags on page load, then initialize overview
@@ -5018,25 +4266,9 @@ export function getDashboardHTML(): string {
         overviewLoaded = true;
       }
 
-      // Load data for helper agents tab
-      if (tabId === 'helpers' && !helperAgentsData) {
-        loadHelperAgents();
-      }
-
-      // Load data for usage tab (only if Claude usage feature is enabled)
-      if (tabId === 'usage' && !usageData && featureFlags.claudeUsage) {
-        loadUsageData();
-      }
-
-      // Load data for memory tab (only if cipher feature is enabled)
-      if (tabId === 'memory' && !memoryData && featureFlags.cipher) {
+      // Load data for memory tab
+      if (tabId === 'memory' && !memoryData) {
         loadMemoryData();
-      }
-
-      // AI Limits tab - hide main header to maximize iframe space
-      const mainHeader = document.querySelector('.container > header');
-      if (mainHeader) {
-        mainHeader.style.display = tabId === 'antigravity' ? 'none' : '';
       }
 
       // Load data for skills tab (only if skills feature is enabled)
@@ -5056,13 +4288,10 @@ export function getDashboardHTML(): string {
         // Load backend health
         await loadOverviewBackendHealth();
 
-        // Load recent memories (only if cipher feature is enabled)
-        if (featureFlags.cipher) {
-          try {
-            await loadOverviewRecentMemories();
-          } catch (err) {
-            console.warn('Failed to load recent memories (feature may be disabled):', err);
-          }
+        try {
+          await loadOverviewRecentMemories();
+        } catch (err) {
+          console.warn('Failed to load Chronicle memories:', err);
         }
 
         // Load skills list (only if skills feature is enabled)
@@ -5074,14 +4303,6 @@ export function getDashboardHTML(): string {
           }
         }
 
-        // Load usage summary (only if Claude usage feature is enabled)
-        if (featureFlags.claudeUsage) {
-          try {
-            await loadOverviewUsageSummary();
-          } catch (err) {
-            console.warn('Failed to load usage summary (feature may be disabled):', err);
-          }
-        }
       } catch (err) {
         console.error('Failed to load overview data:', err);
       }
@@ -5286,34 +4507,35 @@ export function getDashboardHTML(): string {
     async function loadOverviewRecentMemories() {
       const container = document.getElementById('recent-memories-list');
       try {
-        const res = await fetch('/dashboard/api/cipher/qdrant-stats');
+        const res = await fetch('/dashboard/api/chronicle/daily');
         if (!res.ok) {
-          container.innerHTML = '<div class="overview-empty">Memory not configured</div>';
+          container.innerHTML = '<div class="overview-empty">Chronicle memory not available</div>';
           return;
         }
         const data = await res.json();
-        const memories = data.recentMemories || [];
+        const memories = data.memories || [];
 
         if (memories.length === 0) {
-          container.innerHTML = '<div class="overview-empty">No memories yet</div>';
+          container.innerHTML = '<div class="overview-empty">No Chronicle summaries for today</div>';
           return;
         }
 
         const recentMemories = memories.slice(0, 4);
         container.innerHTML = recentMemories.map(m => {
           const timeAgo = getTimeAgo(new Date(m.timestamp));
-          const truncatedText = m.text.length > 60 ? m.text.substring(0, 60) + '...' : m.text;
+          const text = m.summary || m.title || '';
+          const truncatedText = text.length > 90 ? text.substring(0, 90) + '...' : text;
           return \`
             <div class="activity-item">
-              <div class="activity-icon memory">💭</div>
+              <div class="activity-icon memory">\${m.kind === '6h' ? '6h' : '10m'}</div>
               <div class="activity-text">\${truncatedText}</div>
               <div class="activity-time">\${timeAgo}</div>
             </div>
           \`;
         }).join('');
       } catch (err) {
-        console.error('Failed to load memories:', err);
-        container.innerHTML = '<div class="overview-empty">Failed to load memories</div>';
+        console.error('Failed to load Chronicle memories:', err);
+        container.innerHTML = '<div class="overview-empty">Failed to load Chronicle memory</div>';
       }
     }
 
@@ -5354,30 +4576,6 @@ export function getDashboardHTML(): string {
       }
     }
 
-    async function loadOverviewUsageSummary() {
-      try {
-        const res = await fetch('/dashboard/api/usage/cached');
-        if (!res.ok) return;
-        const data = await res.json();
-
-        const today = data.byDate?.[0];
-        if (today) {
-          document.getElementById('usage-api-calls').textContent = today.totalCalls?.toLocaleString() || '--';
-          document.getElementById('usage-input-tokens').textContent = formatTokens(today.inputTokens);
-          document.getElementById('usage-output-tokens').textContent = formatTokens(today.outputTokens);
-        }
-      } catch (err) {
-        console.error('Failed to load usage summary:', err);
-      }
-    }
-
-    function formatTokens(num) {
-      if (!num) return '--';
-      if (num >= 1000000) return (num / 1000000).toFixed(1) + 'M';
-      if (num >= 1000) return (num / 1000).toFixed(1) + 'K';
-      return num.toString();
-    }
-
     function getTimeAgo(date) {
       const seconds = Math.floor((new Date() - date) / 1000);
       if (seconds < 60) return 'just now';
@@ -5390,592 +4588,125 @@ export function getDashboardHTML(): string {
     }
 
     // ==========================================
-    // AI Limits (embedded iframe)
-    // ==========================================
-
-    // ==========================================
-    // Claude Usage Analytics
-    // ==========================================
-    let usageData = null;
-    let dailyChart = null;
-    let modelChart = null;
-    let liveSessionInterval = null;
-
-    async function loadUsageData() {
-      const statsContainer = document.getElementById('usage-stats-container');
-      const chartsContainer = document.getElementById('usage-charts-container');
-
-      statsContainer.innerHTML = '<div class="usage-loading">Loading usage data...</div>';
-      chartsContainer.innerHTML = '';
-
-      try {
-        const res = await fetch('/dashboard/api/claude-usage');
-
-        if (!res.ok) {
-          const error = await res.json();
-          statsContainer.innerHTML = \`
-            <div class="usage-error">
-              <p><strong>Failed to load usage data</strong></p>
-              <p>\${error.message || 'Make sure ccusage is installed: npx ccusage@latest'}</p>
-            </div>
-          \`;
-          return;
-        }
-
-        usageData = await res.json();
-        renderUsageStats();
-        renderUsageCharts();
-        startLiveSessionMonitor();
-      } catch (err) {
-        statsContainer.innerHTML = \`
-          <div class="usage-error">
-            <p><strong>Error loading usage data</strong></p>
-            <p>\${err.message}</p>
-          </div>
-        \`;
-      }
-    }
-
-    function renderUsageStats() {
-      if (!usageData) return;
-
-      const container = document.getElementById('usage-stats-container');
-      const formatCost = (cost) => '$' + cost.toFixed(2);
-      
-      const formatCompactNumber = (num) => {
-        if (num >= 1000000000) {
-          return (num / 1000000000).toFixed(2) + 'B';
-        }
-        if (num >= 1000000) {
-          return (num / 1000000).toFixed(2) + 'M';
-        }
-        if (num >= 1000) {
-          return (num / 1000).toFixed(1) + 'k';
-        }
-        return num.toLocaleString();
-      };
-      
-      const formatPercent = (pct) => pct.toFixed(1) + '%';
-
-      // Calculate additional metrics
-      const projectedMonthly = usageData.avgCostPerDay * 30;
-      const cacheSavings = usageData.totalCacheReadTokens * 0.000003; // Approx savings from cache
-      const totalRequests = usageData.totalSessions || usageData.daily?.length || 0;
-
-      container.innerHTML = \`
-        <div class="usage-grid">
-          <div class="usage-stat">
-            <div class="usage-stat-value large">\${formatCost(usageData.totalCost)}</div>
-            <div class="usage-stat-label">Total Spend</div>
-            <div class="usage-stat-sublabel">\${usageData.daysActive} days active</div>
-          </div>
-          <div class="usage-stat">
-            <div class="usage-stat-value">\${formatCost(usageData.avgCostPerDay)}</div>
-            <div class="usage-stat-label">Avg Cost/Day</div>
-            <div class="usage-stat-sublabel">~\${formatCost(projectedMonthly)}/month projected</div>
-          </div>
-          <div class="usage-stat success">
-            <div class="usage-stat-value">\${formatPercent(usageData.cacheHitRatio)}</div>
-            <div class="usage-stat-label">Cache Hit Ratio</div>
-            <div class="usage-stat-sublabel">~\${formatCost(cacheSavings)} saved</div>
-          </div>
-          <div class="usage-stat">
-            <div class="usage-stat-value">\${formatCompactNumber(usageData.totalInputTokens + usageData.totalOutputTokens)}</div>
-            <div class="usage-stat-label">Total Tokens</div>
-            <div class="usage-stat-sublabel">\${formatCompactNumber(usageData.totalInputTokens)} in / \${formatCompactNumber(usageData.totalOutputTokens)} out</div>
-          </div>
-        </div>
-        <div class="usage-grid" style="margin-top: -1rem;">
-          <div class="usage-stat">
-            <div class="usage-stat-value">\${formatCompactNumber(usageData.totalCacheCreationTokens || 0)}</div>
-            <div class="usage-stat-label">Cache Write</div>
-          </div>
-          <div class="usage-stat">
-            <div class="usage-stat-value">\${formatCompactNumber(usageData.totalCacheReadTokens || 0)}</div>
-            <div class="usage-stat-label">Cache Read</div>
-          </div>
-          <div class="usage-stat">
-            <div class="usage-stat-value">\${formatCompactNumber(usageData.totalInputTokens || 0)}</div>
-            <div class="usage-stat-label">Input Tokens</div>
-          </div>
-          <div class="usage-stat">
-            <div class="usage-stat-value">\${formatCompactNumber(usageData.totalOutputTokens || 0)}</div>
-            <div class="usage-stat-label">Output Tokens</div>
-          </div>
-        </div>
-      \`;
-    }
-
-    function renderUsageCharts() {
-      if (!usageData || !usageData.daily || usageData.daily.length === 0) return;
-
-      const container = document.getElementById('usage-charts-container');
-
-      // Get model colors
-      const modelColors = {
-        'Claude Opus': '#E2A93B',
-        'Claude Sonnet': '#5B8DEF',
-        'Claude Haiku': '#34D399',
-      };
-
-      // Build model breakdown HTML
-      const modelBreakdownHTML = usageData.modelDistribution
-        .slice(0, 5)
-        .map((m, i) => {
-          const color = modelColors[m.model] || ['#F87171', '#FBBF24', '#E2A93B'][i % 3];
-          return \`
-            <div class="model-item">
-              <div class="model-color" style="background: \${color}"></div>
-              <span class="model-name">\${m.model}</span>
-              <span class="model-cost">$\${m.cost.toFixed(2)}</span>
-              <span class="model-percent">\${m.percentage.toFixed(1)}%</span>
-            </div>
-          \`;
-        })
-        .join('');
-
-      // Build top days HTML
-      const topDaysHTML = usageData.topDays
-        .slice(0, 5)
-        .map(day => \`
-          <li>
-            <span class="top-day-date">\${formatDate(day.date)}</span>
-            <span class="top-day-cost">$\${day.totalCost.toFixed(2)}</span>
-          </li>
-        \`)
-        .join('');
-
-      container.innerHTML = \`
-        <div class="charts-grid">
-          <div class="chart-card">
-            <h3>Daily Cost Trend</h3>
-            <div class="chart-container">
-              <canvas id="daily-chart"></canvas>
-            </div>
-          </div>
-          <div class="chart-card">
-            <h3>Model Distribution</h3>
-            <div class="chart-container">
-              <canvas id="model-chart"></canvas>
-            </div>
-            <div class="model-breakdown">
-              \${modelBreakdownHTML}
-            </div>
-          </div>
-        </div>
-        <div class="charts-grid">
-          <div class="chart-card">
-            <h3>Top Usage Days</h3>
-            <ul class="top-days-list">
-              \${topDaysHTML || '<li><span class="top-day-date">No data</span></li>'}
-            </ul>
-          </div>
-          <div class="chart-card">
-            <h3>Token Efficiency</h3>
-            <div class="chart-container" style="height: 200px;">
-              <canvas id="efficiency-chart"></canvas>
-            </div>
-          </div>
-        </div>
-      \`;
-
-      // Render charts
-      renderDailyChart();
-      renderModelChart();
-      renderEfficiencyChart();
-    }
-
-    function formatDate(dateStr) {
-      const date = new Date(dateStr);
-      return date.toLocaleDateString('en-US', { month: 'short', day: 'numeric' });
-    }
-
-    function renderDailyChart() {
-      const ctx = document.getElementById('daily-chart');
-      if (!ctx || !usageData?.daily) return;
-
-      // Get last 30 days of data
-      const recentData = usageData.daily.slice(-30);
-
-      if (dailyChart) {
-        dailyChart.destroy();
-      }
-
-      dailyChart = new Chart(ctx, {
-        type: 'bar',
-        data: {
-          labels: recentData.map(d => formatDate(d.date)),
-          datasets: [{
-            label: 'Daily Cost',
-            data: recentData.map(d => d.totalCost),
-            backgroundColor: 'rgba(226, 169, 59, 0.6)',
-            borderColor: 'rgba(226, 169, 59, 1)',
-            borderWidth: 1,
-            borderRadius: 4,
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          plugins: {
-            legend: {
-              display: false
-            },
-            tooltip: {
-              callbacks: {
-                label: (ctx) => '$' + ctx.raw.toFixed(2)
-              }
-            }
-          },
-          scales: {
-            x: {
-              grid: {
-                display: false,
-                color: 'rgba(255,255,255,0.1)'
-              },
-              ticks: {
-                color: '#94a3b8',
-                maxRotation: 45,
-                minRotation: 45
-              }
-            },
-            y: {
-              grid: {
-                color: 'rgba(255,255,255,0.05)'
-              },
-              ticks: {
-                color: '#94a3b8',
-                callback: (val) => '$' + val
-              }
-            }
-          }
-        }
-      });
-    }
-
-    function renderModelChart() {
-      const ctx = document.getElementById('model-chart');
-      if (!ctx || !usageData?.modelDistribution) return;
-
-      const colors = ['#E2A93B', '#5B8DEF', '#34D399', '#FBBF24', '#E25B7C'];
-      const data = usageData.modelDistribution.slice(0, 5);
-
-      if (modelChart) {
-        modelChart.destroy();
-      }
-
-      modelChart = new Chart(ctx, {
-        type: 'doughnut',
-        data: {
-          labels: data.map(m => m.model),
-          datasets: [{
-            data: data.map(m => m.cost),
-            backgroundColor: colors.slice(0, data.length),
-            borderWidth: 0,
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          cutout: '65%',
-          plugins: {
-            legend: {
-              display: false
-            },
-            tooltip: {
-              callbacks: {
-                label: (ctx) => ctx.label + ': $' + ctx.raw.toFixed(2)
-              }
-            }
-          }
-        }
-      });
-    }
-
-    function renderEfficiencyChart() {
-      const ctx = document.getElementById('efficiency-chart');
-      if (!ctx || !usageData) return;
-
-      const cacheWrite = usageData.totalCacheCreationTokens;
-      const cacheRead = usageData.totalCacheReadTokens;
-      const input = usageData.totalInputTokens;
-      const output = usageData.totalOutputTokens;
-
-      new Chart(ctx, {
-        type: 'bar',
-        data: {
-          labels: ['Cache Write', 'Cache Read', 'Input', 'Output'],
-          datasets: [{
-            data: [cacheWrite, cacheRead, input, output].map(v => v / 1000000),
-            backgroundColor: ['#FBBF24', '#34D399', '#E2A93B', '#5B8DEF'],
-            borderWidth: 0,
-            borderRadius: 4,
-          }]
-        },
-        options: {
-          responsive: true,
-          maintainAspectRatio: false,
-          indexAxis: 'y',
-          plugins: {
-            legend: {
-              display: false
-            },
-            tooltip: {
-              callbacks: {
-                label: (ctx) => ctx.raw.toFixed(2) + 'M tokens'
-              }
-            }
-          },
-          scales: {
-            x: {
-              grid: {
-                color: 'rgba(255,255,255,0.05)'
-              },
-              ticks: {
-                color: '#94a3b8',
-                callback: (val) => val + 'M'
-              }
-            },
-            y: {
-              grid: {
-                display: false
-              },
-              ticks: {
-                color: '#94a3b8'
-              }
-            }
-          }
-        }
-      });
-    }
-
-    async function refreshUsageData() {
-      usageData = null;
-      await loadUsageData();
-      showToast('Usage data refreshed');
-    }
-
-    // Live session monitoring
-    async function updateLiveSession() {
-      const container = document.getElementById('live-session-container');
-
-      try {
-        const res = await fetch('/dashboard/api/claude-usage/current');
-        const data = await res.json();
-
-        if (data.active && data.session) {
-          const s = data.session;
-          const startTime = s.startTime ? new Date(s.startTime).toLocaleTimeString() : 'Unknown';
-
-          container.innerHTML = \`
-            <div class="live-session">
-              <div class="live-indicator"></div>
-              <div class="live-session-info">
-                <div class="live-session-title">Active Session: \${s.slug || s.sessionId}</div>
-                <div class="live-session-meta">
-                  Started: \${startTime} · Model: \${s.model || 'Unknown'} ·
-                  Tokens: \${(s.inputTokens + s.outputTokens).toLocaleString()}
-                </div>
-              </div>
-              <div class="live-session-cost">$\${s.totalCost.toFixed(4)}</div>
-            </div>
-          \`;
-        } else {
-          container.innerHTML = '';
-        }
-      } catch (err) {
-        container.innerHTML = '';
-      }
-    }
-
-    function startLiveSessionMonitor() {
-      if (liveSessionInterval) {
-        clearInterval(liveSessionInterval);
-      }
-
-      // Initial update
-      updateLiveSession();
-
-      // Update every 5 seconds
-      liveSessionInterval = setInterval(() => {
-        if (currentTab === 'usage') {
-          updateLiveSession();
-        }
-      }, 5000);
-    }
-
-    // ==========================================
-    // Cipher Memory
+    // Chronicle Memory
     // ==========================================
     let memoryData = null;
     let memorySessions = [];
-    let qdrantStats = null;
+
+    function getChronicleDate() {
+      const input = document.getElementById('chronicle-date');
+      const today = new Date().toISOString().slice(0, 10);
+      if (input && !input.value) {
+        input.value = today;
+      }
+      return input?.value || today;
+    }
+
+    function formatChronicleTime(timestamp) {
+      if (!timestamp) return 'Unknown';
+      return new Date(timestamp).toLocaleString('en-US', {
+        month: 'short',
+        day: 'numeric',
+        hour: '2-digit',
+        minute: '2-digit',
+      });
+    }
+
+    function formatChronicleKind(kind) {
+      return kind === '6h' ? '6 hour' : '10 minute';
+    }
 
     async function loadMemoryData() {
       const statsContainer = document.getElementById('memory-stats-container');
       const sessionsContainer = document.getElementById('memory-sessions-container');
+      const date = getChronicleDate();
 
-      statsContainer.innerHTML = '<div class="memory-loading">Connecting to Cipher Memory...</div>';
-      sessionsContainer.innerHTML = '<div class="memory-loading">Loading memories...</div>';
+      statsContainer.innerHTML = '<div class="memory-loading">Loading Chronicle daily memory...</div>';
+      sessionsContainer.innerHTML = '<div class="memory-loading">Loading Chronicle summaries...</div>';
 
-      // Fetch Qdrant stats (actual persistent memories)
       try {
-        const qdrantRes = await fetch('/dashboard/api/cipher/qdrant-stats');
-        if (qdrantRes.ok) {
-          qdrantStats = await qdrantRes.json();
-        }
-      } catch (err) {
-        console.warn('Could not fetch Qdrant stats:', err);
-      }
-
-      // Fetch Cipher sessions (local conversation history)
-      try {
-        const res = await fetch('/dashboard/api/cipher/sessions');
-
-        if (!res.ok && !qdrantStats) {
-          const error = await res.json();
-          statsContainer.innerHTML = \`
-            <div class="memory-error">
-              <p><strong>Cipher Memory not available</strong></p>
-              <p>\${error.message || 'Make sure cipher-memory container is running.'}</p>
-            </div>
-          \`;
-          sessionsContainer.innerHTML = '';
-          return;
+        const res = await fetch(\`/dashboard/api/chronicle/daily?date=\${encodeURIComponent(date)}\`);
+        if (!res.ok) {
+          const error = await res.json().catch(() => ({}));
+          throw new Error(error.message || 'Chronicle memory API failed');
         }
 
-        if (res.ok) {
-          const data = await res.json();
-          memoryData = data;
-          memorySessions = data.data?.sessions || data.sessions || [];
-        }
-
+        memoryData = await res.json();
+        memorySessions = memoryData.memories || [];
         renderMemoryStats();
         renderMemorySessions();
       } catch (err) {
-        // If Qdrant stats are available, show them even if Cipher API fails
-        if (qdrantStats) {
-          renderMemoryStats();
-          renderMemorySessions();
-        } else {
-          statsContainer.innerHTML = \`
-            <div class="memory-error">
-              <p><strong>Error connecting to Cipher</strong></p>
-              <p>\${err.message}</p>
-            </div>
-          \`;
-          sessionsContainer.innerHTML = '';
-        }
+        statsContainer.innerHTML = \`
+          <div class="memory-error">
+            <p><strong>Chronicle memory not available</strong></p>
+            <p>\${escapeHtml(err.message)}</p>
+          </div>
+        \`;
+        sessionsContainer.innerHTML = '';
       }
     }
 
     function renderMemoryStats() {
       const container = document.getElementById('memory-stats-container');
-
-      // Use Qdrant stats if available, otherwise fall back to session stats
-      const stats = qdrantStats?.stats || {
-        totalMemories: 0,
-        decisions: 0,
-        learnings: 0,
-        patterns: 0,
-        insights: 0,
-      };
-
-      const totalMemories = stats.totalMemories;
-      const decisions = stats.decisions;
-      const learnings = stats.learnings;
+      const tenMinute = memorySessions.filter(memory => memory.kind === '10min').length;
+      const sixHour = memorySessions.filter(memory => memory.kind === '6h').length;
+      const latest = memorySessions[0]?.timestamp ? formatChronicleTime(memorySessions[0].timestamp) : 'No entries';
 
       container.innerHTML = \`
         <div class="memory-stats-grid">
           <div class="memory-stat">
-            <div class="memory-stat-value" style="color: #5B8DEF;">\${totalMemories}</div>
-            <div class="memory-stat-label">Total Memories</div>
+            <div class="memory-stat-value">\${memorySessions.length}</div>
+            <div class="memory-stat-label">Entries on \${escapeHtml(memoryData?.date || getChronicleDate())}</div>
           </div>
           <div class="memory-stat">
-            <div class="memory-stat-value" style="color: #E2A93B;">\${decisions}</div>
-            <div class="memory-stat-label">Decisions</div>
+            <div class="memory-stat-value">\${tenMinute}</div>
+            <div class="memory-stat-label">10 minute summaries</div>
           </div>
           <div class="memory-stat">
-            <div class="memory-stat-value" style="color: #4ade80;">\${learnings}</div>
-            <div class="memory-stat-label">Learnings</div>
+            <div class="memory-stat-value">\${sixHour}</div>
+            <div class="memory-stat-label">6 hour summaries</div>
           </div>
           <div class="memory-stat">
-            <div class="memory-stat-value" style="color: #fbbf24;">\${stats.patterns + stats.insights}</div>
-            <div class="memory-stat-label">Patterns & Insights</div>
+            <div class="memory-stat-value" style="font-size: 1rem;">\${escapeHtml(latest)}</div>
+            <div class="memory-stat-label">Latest Chronicle update</div>
           </div>
-        </div>
-        <div style="margin-top: 1rem; padding: 0.75rem 1rem; background: rgba(226, 169, 59, 0.08); border: 1px solid rgba(226, 169, 59, 0.15); border-radius: 8px; font-size: 0.85rem;">
-          <div style="display: flex; align-items: center; gap: 0.5rem; margin-bottom: 0.25rem;">
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#E2A93B" stroke-width="2.5" stroke-linecap="round"><path d="M12 2L2 7l10 5 10-5-10-5z"></path><path d="M2 17l10 5 10-5"></path><path d="M2 12l10 5 10-5"></path></svg>
-            <strong style="color: #E2A93B;">Qdrant Cloud Storage</strong>
-          </div>
-          <div style="opacity: 0.8;">Memories are stored in Qdrant Cloud with 20-day TTL. Pass <code style="background: rgba(226, 169, 59, 0.15); padding: 0.1rem 0.3rem; border-radius: 4px;">projectPath</code> to <code style="background: rgba(226, 169, 59, 0.15); padding: 0.1rem 0.3rem; border-radius: 4px;">ask_cipher</code> for cross-IDE persistence.</div>
         </div>
       \`;
     }
 
     function renderMemorySessions() {
       const container = document.getElementById('memory-sessions-container');
-      const recentMemories = qdrantStats?.recentMemories || [];
 
-      if (!recentMemories || recentMemories.length === 0) {
+      if (!memorySessions.length) {
         container.innerHTML = \`
           <div class="memory-empty">
             <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5">
               <circle cx="12" cy="12" r="10"></circle>
               <path d="M12 8v4l3 3"></path>
             </svg>
-            <p>No memories stored yet</p>
-            <p style="font-size: 0.85rem; margin-top: 0.5rem;">Start using Cipher to store decisions, learnings, and patterns.</p>
+            <p>No Chronicle summaries for this date</p>
           </div>
         \`;
         return;
       }
 
-      const memoriesHTML = recentMemories.map(memory => {
-        const text = memory.text || 'Empty memory';
-        const timestamp = memory.timestamp;
-        const formattedDate = timestamp ? new Date(timestamp).toLocaleDateString('en-US', {
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit'
-        }) : 'Unknown';
-        const tags = memory.tags || [];
-        const projectPath = memory.projectPath;
-
-        // Determine badge type based on content
-        let badgeType = '';
-        let badgeText = '';
-        const textLower = text.toLowerCase();
-        if (textLower.includes('decision') || textLower.includes('store decision')) { badgeType = 'decision'; badgeText = 'Decision'; }
-        else if (textLower.includes('learning') || textLower.includes('learned') || textLower.includes('fix')) { badgeType = 'learning'; badgeText = 'Learning'; }
-        else if (textLower.includes('pattern')) { badgeType = 'pattern'; badgeText = 'Pattern'; }
-        else if (textLower.includes('insight')) { badgeType = 'insight'; badgeText = 'Insight'; }
-        else if (textLower.startsWith('user:')) { badgeType = 'user'; badgeText = 'User'; }
-        else if (textLower.startsWith('assistant:')) { badgeType = 'assistant'; badgeText = 'Assistant'; }
-        else if (textLower.startsWith('tools used:')) { badgeType = 'tool'; badgeText = 'Tool'; }
-
-        // Extract project name from path
-        const projectName = projectPath ? projectPath.split('/').pop() : null;
-
-        return \`
-          <div class="memory-session-card" style="cursor: pointer;" onclick="viewMemoryDetail('\${memory.id}')">
-            <div class="memory-session-header">
-              <div class="memory-session-title" style="font-size: 0.9rem; line-height: 1.4;">\${escapeHtml(text)}</div>
-            </div>
-            <div class="memory-session-meta" style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-              \${badgeText ? \`<span class="memory-badge \${badgeType}">\${badgeText}</span>\` : ''}
-              \${projectName ? \`<span style="background: rgba(91, 141, 239, 0.15); color: #5B8DEF; padding: 0.15rem 0.5rem; border-radius: 4px; font-size: 0.75rem;">\${escapeHtml(projectName)}</span>\` : ''}
-              <span style="opacity: 0.6;">\${formattedDate}</span>
-            </div>
-          </div>
-        \`;
-      }).join('');
-
       container.innerHTML = \`
-        <div style="margin-bottom: 0.75rem; font-size: 0.9rem; color: #9B9590;">Recent Memories (from Qdrant Cloud)</div>
-        <div class="memory-sessions-grid">\${memoriesHTML}</div>
+        <div class="memory-sessions-grid">
+          \${memorySessions.map(memory => \`
+            <div class="memory-session-card" data-memory-id="\${escapeHtml(memory.id)}" onclick="viewMemoryDetail(this.dataset.memoryId || '')">
+              <div class="memory-session-header">
+                <div>
+                  <div class="memory-session-title">\${escapeHtml(memory.title)}</div>
+                  <div class="memory-session-meta">
+                    <span class="memory-badge \${memory.kind === '6h' ? 'milestone' : 'learning'}">\${formatChronicleKind(memory.kind)}</span>
+                    <span>\${formatChronicleTime(memory.timestamp)}</span>
+                  </div>
+                </div>
+              </div>
+              <div class="memory-session-preview">\${escapeHtml(memory.summary || 'No summary text available.')}</div>
+            </div>
+          \`).join('')}
+        </div>
       \`;
     }
 
@@ -5986,145 +4717,35 @@ export function getDashboardHTML(): string {
 
       panel.classList.remove('hidden');
       panel.classList.add('active');
-      titleEl.textContent = 'Memory Details';
-      contentEl.innerHTML = '<div class="memory-loading">Loading memory...</div>';
+      titleEl.textContent = 'Chronicle Memory';
+      contentEl.innerHTML = '<div class="memory-loading">Loading Chronicle memory...</div>';
 
       try {
-        const res = await fetch(\`/dashboard/api/cipher/memory/\${encodeURIComponent(memoryId)}\`);
-
+        const res = await fetch(\`/dashboard/api/chronicle/memory/\${encodeURIComponent(memoryId)}\`);
         if (!res.ok) {
-          throw new Error('Failed to load memory');
+          const error = await res.json().catch(() => ({}));
+          throw new Error(error.message || 'Failed to load Chronicle memory');
         }
 
-        const data = await res.json();
-        const memory = data.memory;
-
-        if (!memory) {
-          throw new Error('Memory not found');
-        }
-
-        // Format timestamp
-        const timestamp = memory.timestamp ? new Date(memory.timestamp).toLocaleString('en-US', {
-          weekday: 'short',
-          year: 'numeric',
-          month: 'short',
-          day: 'numeric',
-          hour: '2-digit',
-          minute: '2-digit',
-          second: '2-digit'
-        }) : 'Unknown';
-
-        // Determine badge type
-        const textLower = (memory.text || '').toLowerCase();
-        let badgeType = '';
-        let badgeText = '';
-        if (textLower.includes('decision') || textLower.includes('store decision')) { badgeType = 'decision'; badgeText = 'Decision'; }
-        else if (textLower.includes('learning') || textLower.includes('learned') || textLower.includes('fix')) { badgeType = 'learning'; badgeText = 'Learning'; }
-        else if (textLower.includes('pattern')) { badgeType = 'pattern'; badgeText = 'Pattern'; }
-        else if (textLower.includes('insight')) { badgeType = 'insight'; badgeText = 'Insight'; }
-        else if (textLower.startsWith('user:')) { badgeType = 'user'; badgeText = 'User Message'; }
-        else if (textLower.startsWith('assistant:')) { badgeType = 'assistant'; badgeText = 'Assistant Response'; }
-        else if (textLower.startsWith('tools used:')) { badgeType = 'tool'; badgeText = 'Tool Usage'; }
-
-        // Extract project name
-        const projectName = memory.projectPath ? memory.projectPath.split('/').pop() : null;
-
+        const memory = await res.json();
+        titleEl.textContent = memory.title || 'Chronicle Memory';
         contentEl.innerHTML = \`
           <div style="display: flex; flex-direction: column; gap: 1rem;">
             <div style="display: flex; align-items: center; gap: 0.5rem; flex-wrap: wrap;">
-              \${badgeText ? \`<span class="memory-badge \${badgeType}" style="font-size: 0.85rem;">\${badgeText}</span>\` : ''}
-              \${projectName ? \`<span style="background: rgba(91, 141, 239, 0.15); color: #5B8DEF; padding: 0.25rem 0.6rem; border-radius: 4px; font-size: 0.8rem;">\${escapeHtml(projectName)}</span>\` : ''}
+              <span class="memory-badge \${memory.kind === '6h' ? 'milestone' : 'learning'}">\${formatChronicleKind(memory.kind)}</span>
+              <span style="color: var(--text-muted);">\${formatChronicleTime(memory.timestamp)}</span>
             </div>
-
-            <div style="background: rgba(16, 16, 22, 0.5); padding: 1rem; border-radius: 8px; border: 1px solid rgba(226, 169, 59, 0.08);">
-              <div style="font-size: 0.75rem; color: #6B6560; margin-bottom: 0.5rem; text-transform: uppercase; letter-spacing: 0.05em;">Content</div>
-              <div style="font-size: 0.95rem; line-height: 1.6; white-space: pre-wrap; word-break: break-word;">\${escapeHtml(memory.text || 'Empty memory')}</div>
+            <div style="background: var(--bg-card); padding: 1rem; border-radius: 8px; border: 1px solid var(--border);">
+              <div class="memory-detail-markdown">\${escapeHtml(memory.content || '')}</div>
             </div>
-
-            <div style="display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 0.75rem;">
-              <div style="background: rgba(16, 16, 22, 0.3); padding: 0.75rem; border-radius: 6px;">
-                <div style="font-size: 0.7rem; color: #6B6560; text-transform: uppercase; letter-spacing: 0.05em;">Timestamp</div>
-                <div style="font-size: 0.85rem; margin-top: 0.25rem;">\${timestamp}</div>
-              </div>
-              <div style="background: rgba(16, 16, 22, 0.3); padding: 0.75rem; border-radius: 6px;">
-                <div style="font-size: 0.7rem; color: #6B6560; text-transform: uppercase; letter-spacing: 0.05em;">Project Path</div>
-                <div style="font-size: 0.85rem; margin-top: 0.25rem; word-break: break-all;">\${escapeHtml(memory.projectPath || 'Not specified')}</div>
-              </div>
-              <div style="background: rgba(16, 16, 22, 0.3); padding: 0.75rem; border-radius: 6px;">
-                <div style="font-size: 0.7rem; color: #6B6560; text-transform: uppercase; letter-spacing: 0.05em;">Memory ID</div>
-                <div style="font-size: 0.75rem; margin-top: 0.25rem; font-family: monospace; word-break: break-all; opacity: 0.7;">\${escapeHtml(memoryId)}</div>
-              </div>
-            </div>
-
-            \${memory.tags && memory.tags.length > 0 ? \`
-              <div>
-                <div style="font-size: 0.7rem; color: #6B6560; text-transform: uppercase; letter-spacing: 0.05em; margin-bottom: 0.5rem;">Tags</div>
-                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
-                  \${memory.tags.map(tag => \`<span style="background: rgba(226, 169, 59, 0.15); color: #E2A93B; padding: 0.2rem 0.5rem; border-radius: 4px; font-size: 0.8rem;">\${escapeHtml(tag)}</span>\`).join('')}
-                </div>
-              </div>
-            \` : ''}
+            <div style="font-size: 0.75rem; color: var(--text-muted); word-break: break-all;">Source: \${escapeHtml(memory.source || memoryId)}</div>
           </div>
         \`;
       } catch (err) {
         contentEl.innerHTML = \`
           <div class="memory-error">
-            <p><strong>Error loading memory</strong></p>
-            <p>\${err.message}</p>
-          </div>
-        \`;
-      }
-    }
-
-    async function viewMemorySession(sessionId) {
-      const panel = document.getElementById('memory-detail-panel');
-      const titleEl = document.getElementById('memory-detail-title');
-      const contentEl = document.getElementById('memory-detail-content');
-
-      panel.classList.remove('hidden');
-      panel.classList.add('active');
-      titleEl.textContent = 'Loading...';
-      contentEl.innerHTML = '<div class="memory-loading">Loading session history...</div>';
-
-      try {
-        const res = await fetch(\`/dashboard/api/cipher/sessions/\${encodeURIComponent(sessionId)}/history\`);
-
-        if (!res.ok) {
-          throw new Error('Failed to load session history');
-        }
-
-        const data = await res.json();
-        const history = data.data?.history || data.history || [];
-        const session = memorySessions.find(s => s.id === sessionId);
-
-        titleEl.textContent = session?.title || sessionId;
-
-        if (history.length === 0) {
-          contentEl.innerHTML = '<div class="memory-empty"><p>No messages in this session</p></div>';
-          return;
-        }
-
-        const messagesHTML = history.map(msg => {
-          const role = msg.role || 'unknown';
-          const content = msg.content || '';
-          const textContent = Array.isArray(content)
-            ? content.map(c => c.text || c.content || JSON.stringify(c)).join('\\n')
-            : (typeof content === 'string' ? content : JSON.stringify(content));
-
-          return \`
-            <div class="memory-message \${role}">
-              <div class="memory-message-role">\${escapeHtml(role)}</div>
-              <div class="memory-message-content">\${escapeHtml(textContent)}</div>
-            </div>
-          \`;
-        }).join('');
-
-        contentEl.innerHTML = messagesHTML;
-      } catch (err) {
-        contentEl.innerHTML = \`
-          <div class="memory-error">
-            <p><strong>Error loading session</strong></p>
-            <p>\${err.message}</p>
+            <p><strong>Error loading Chronicle memory</strong></p>
+            <p>\${escapeHtml(err.message)}</p>
           </div>
         \`;
       }
@@ -6136,61 +4757,13 @@ export function getDashboardHTML(): string {
       setTimeout(() => panel.classList.add('hidden'), 300);
     }
 
-    async function searchMemory() {
-      const searchInput = document.getElementById('memory-search');
-      const query = searchInput.value.trim();
-
-      if (!query) {
-        showToast('Please enter a search query', true);
-        return;
-      }
-
-      const sessionsContainer = document.getElementById('memory-sessions-container');
-      sessionsContainer.innerHTML = '<div class="memory-loading">Searching memory...</div>';
-
-      try {
-        const res = await fetch(\`/dashboard/api/cipher/search?q=\${encodeURIComponent(query)}\`);
-
-        if (!res.ok) {
-          throw new Error('Search failed');
-        }
-
-        const data = await res.json();
-        const result = data.result || data.message || data;
-
-        sessionsContainer.innerHTML = \`
-          <div class="memory-search-results">
-            <div class="section-title" style="margin-bottom: 1rem;">Search Results for "\${escapeHtml(query)}"</div>
-            <div class="memory-search-result">
-              <div class="memory-search-result-content">\${escapeHtml(typeof result === 'string' ? result : JSON.stringify(result, null, 2))}</div>
-            </div>
-            <button class="btn btn-secondary" onclick="loadMemoryData()" style="margin-top: 1rem;">
-              Back to Sessions
-            </button>
-          </div>
-        \`;
-      } catch (err) {
-        sessionsContainer.innerHTML = \`
-          <div class="memory-error">
-            <p><strong>Search failed</strong></p>
-            <p>\${err.message}</p>
-          </div>
-        \`;
-      }
-    }
-
     function refreshMemoryData() {
       memoryData = null;
       memorySessions = [];
       loadMemoryData();
     }
 
-    // Handle Enter key for memory search
-    document.getElementById('memory-search')?.addEventListener('keydown', (e) => {
-      if (e.key === 'Enter') {
-        searchMemory();
-      }
-    });
+    document.getElementById('chronicle-date')?.addEventListener('change', () => refreshMemoryData());
 
     // ==========================================
     // Skills Tab Functions
