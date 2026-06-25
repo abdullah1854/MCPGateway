@@ -1,4 +1,6 @@
 import { strict as assert } from 'assert';
+import express, { NextFunction, Request, Response } from 'express';
+import { AddressInfo } from 'net';
 import {
   createApiKeyAuthorizationContext,
   createOAuthAuthorizationContext,
@@ -8,6 +10,8 @@ import {
 import { AuditLogger } from '../monitoring/audit.js';
 import { CodeExecutor } from '../code-execution/executor.js';
 import { BackendManager } from '../backend/index.js';
+import { createCodeExecutionRoutes } from '../code-execution/routes.js';
+import { AuthenticatedRequest } from '../middleware/auth.js';
 
 let failures = 0;
 
@@ -123,13 +127,73 @@ async function main(): Promise<void> {
     assert.equal(audit.getRecentEvents(10, 'policy_deny').length, 1);
   });
 
+  await runTest('AUTHZ-003: REST skill execution forwards request authorization', async () => {
+    const audit = new AuditLogger({ persistToFile: false });
+    const app = express();
+    app.use(express.json());
+    app.use((req: Request, _res: Response, next: NextFunction) => {
+      (req as AuthenticatedRequest).auth = {
+        type: 'oauth',
+        subject: 'skill-user',
+        scopes: ['gateway:call'],
+      };
+      next();
+    });
+    app.use('/api/code', createCodeExecutionRoutes(new BackendManager(), audit));
+
+    const server = app.listen(0);
+    try {
+      const { port } = server.address() as AddressInfo;
+      const baseUrl = `http://127.0.0.1:${port}/api/code`;
+      const createResponse = await fetch(`${baseUrl}/skills`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({
+          name: 'rest_authz_skill',
+          description: 'Route authorization regression skill',
+          code: 'console.log("should-not-run");',
+          tags: [],
+          inputs: [],
+        }),
+      });
+      assert.equal(createResponse.status, 201);
+
+      const executeResponse = await fetch(`${baseUrl}/skills/rest_authz_skill/execute`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ inputs: {} }),
+      });
+      const body = await executeResponse.json() as {
+        success?: boolean;
+        errorKind?: string;
+        output?: unknown[];
+        hints?: string[];
+      };
+
+      assert.equal(executeResponse.status, 200);
+      assert.equal(body.success, false);
+      assert.equal(body.errorKind, 'security');
+      assert.deepEqual(body.output, []);
+      assert.ok(body.hints?.includes('Required scope: code:execute'));
+      assert.equal(audit.getRecentEvents(10, 'policy_deny').length, 1);
+    } finally {
+      await new Promise<void>((resolve, reject) => {
+        server.close(error => error ? reject(error) : resolve());
+      });
+    }
+  });
+
   console.log(`\nAuthorization policy tests completed${failures ? ` with ${failures} failure(s)` : ''}.`);
   if (failures > 0) {
     process.exitCode = 1;
   }
 }
 
-void main().catch(error => {
-  console.error(error);
-  process.exitCode = 1;
-});
+void main()
+  .catch(error => {
+    console.error(error);
+    process.exitCode = 1;
+  })
+  .finally(() => {
+    process.exit(process.exitCode ?? 0);
+  });

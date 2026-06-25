@@ -963,6 +963,9 @@ export function createCodeExecutionRoutes(backendManager: BackendManager, auditL
       const result = await skillsManager.executeSkill(name, inputs, {
         sessionId: getSessionId(req),
         timeout: validTimeout,
+        authorization: getAuthorization(req),
+        auditLogger,
+        source: 'code-api',
       });
       res.json(result);
     } catch (error) {
