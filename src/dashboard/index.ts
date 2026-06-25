@@ -11,6 +11,12 @@ import ConfigManager from '../config.js';
 import { ServerConfigSchema, ServerConfig } from '../types.js';
 import { logger } from '../logger.js';
 import { generateTopology } from '../services/topology.js';
+import { AuditLogger } from '../monitoring/audit.js';
+import { MetricsCollector } from '../monitoring/metrics.js';
+import { HealthTimelineService } from '../services/health-timeline.js';
+import { ToolAnalyticsService } from '../services/tool-analytics.js';
+import { getAuditContext } from '../middleware/audit-context.js';
+import { fileURLToPath } from 'url';
 import {
   getCachedUsageData,
   getUsageByDateRange,
@@ -104,8 +110,24 @@ const HELPER_AGENT_DEFINITIONS: HelperAgentDefinition[] = [
   },
 ];
 
-export function createDashboardRoutes(backendManager: BackendManager): Router {
+export interface DashboardRouteOptions {
+  auditLogger?: AuditLogger;
+  trustedProxy?: boolean;
+  healthTimeline?: HealthTimelineService;
+  metricsCollector?: MetricsCollector;
+  toolAnalytics?: ToolAnalyticsService;
+}
+
+export function createDashboardRoutes(
+  backendManager: BackendManager,
+  options?: DashboardRouteOptions,
+): Router {
   const router = Router();
+  const auditLogger = options?.auditLogger;
+  const trustedProxy = options?.trustedProxy ?? false;
+  const healthTimeline = options?.healthTimeline;
+  const metricsCollector = options?.metricsCollector;
+  const toolAnalytics = options?.toolAnalytics;
 
   // Serve the dashboard HTML
   router.get('/', (_req: Request, res: Response) => {
@@ -169,6 +191,7 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
   router.post('/api/tools/:name/toggle', (req: Request, res: Response) => {
     const { name } = req.params;
     const { enabled } = req.body;
+    const ctx = getAuditContext(req, trustedProxy);
 
     if (enabled) {
       // If enabling a tool, also enable its backend if disabled
@@ -184,6 +207,14 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
     // Persist state to file
     persistUIState(backendManager);
 
+    auditLogger?.log({
+      eventType: enabled ? 'tool_enable' : 'tool_disable',
+      actor: ctx.actor,
+      ip: ctx.ip,
+      target: name,
+      success: true,
+    });
+
     res.json({ success: true, name, enabled });
   });
 
@@ -191,6 +222,7 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
   router.post('/api/backends/:id/toggle', (req: Request, res: Response) => {
     const { id } = req.params;
     const { enabled } = req.body;
+    const ctx = getAuditContext(req, trustedProxy);
 
     if (enabled) {
       backendManager.enableBackend(id);
@@ -200,6 +232,14 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
 
     // Persist state to file
     persistUIState(backendManager);
+
+    auditLogger?.log({
+      eventType: enabled ? 'backend_enable' : 'backend_disable',
+      actor: ctx.actor,
+      ip: ctx.ip,
+      target: id,
+      success: true,
+    });
 
     res.json({ success: true, id, enabled });
   });
@@ -268,7 +308,7 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
       availability: routerAvailability === 'connected' ? 'available' : 'unavailable',
       routeMethod:
         agent.id === 'codex'
-          ? 'multi_route_task(taskType=\"file-editing\")'
+          ? 'multi_route_task(taskType="file-editing")'
           : 'multi_route_task(taskType=...)',
     }));
 
@@ -472,6 +512,9 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
         await backendManager.addBackend(serverConfig);
       }
 
+      const ctx = getAuditContext(req, trustedProxy);
+      auditLogger?.logServerAdd(serverConfig.id, ctx.actor, ctx.ip);
+
       res.json({ success: true, server: serverConfig });
     } catch (error) {
       res.status(500).json({
@@ -512,6 +555,9 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
       // Update backend manager (disconnect old, connect new if enabled)
       await backendManager.updateBackend(id, serverConfig);
 
+      const ctx = getAuditContext(req, trustedProxy);
+      auditLogger?.logServerEdit(id, { id: serverConfig.id, enabled: serverConfig.enabled }, ctx.actor, ctx.ip);
+
       res.json({ success: true, server: serverConfig });
     } catch (error) {
       res.status(500).json({
@@ -539,6 +585,9 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
 
       // Remove from config file
       configManager.deleteServer(id);
+
+      const ctx = getAuditContext(req, trustedProxy);
+      auditLogger?.logServerDelete(id, ctx.actor, ctx.ip);
 
       res.json({ success: true, id });
     } catch (error) {
@@ -578,10 +627,11 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
   });
 
   // API: Export server configuration
-  router.get('/api/config/export', (_req: Request, res: Response) => {
+  router.get('/api/config/export', (req: Request, res: Response) => {
     try {
       const configManager = ConfigManager.getInstance();
       const config = configManager.getServersConfig();
+      const ctx = getAuditContext(req, trustedProxy);
 
       // Set headers for file download
       res.setHeader('Content-Type', 'application/json');
@@ -589,6 +639,8 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
         'Content-Disposition',
         `attachment; filename="mcp-gateway-config-${new Date().toISOString().split('T')[0]}.json"`
       );
+
+      auditLogger?.logConfigExport(ctx.actor, ctx.ip);
 
       res.json({
         exportedAt: new Date().toISOString(),
@@ -671,6 +723,9 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
         imported++;
       }
 
+      const ctx = getAuditContext(req, trustedProxy);
+      auditLogger?.logConfigImport(imported, ctx.actor, ctx.ip);
+
       res.json({
         success: true,
         imported,
@@ -729,6 +784,137 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
         error: 'Failed to update gateway settings',
         message: error instanceof Error ? error.message : String(error),
       });
+    }
+  });
+
+  // ==========================================
+  // ngrok Tunnel Management API Routes
+  // ==========================================
+
+  let ngrokProcess: ReturnType<typeof exec> | null = null;
+  let ngrokStatus: 'stopped' | 'starting' | 'running' | 'error' = 'stopped';
+  let ngrokError: string | null = null;
+  const ngrokDomain = process.env.NGROK_DOMAIN || 'abdullah-mcp.ngrok-free.dev';
+  const ngrokPort = process.env.PORT || '3010';
+
+  // Check if ngrok is already running externally
+  function detectExternalNgrok(): Promise<boolean> {
+    return new Promise((resolve) => {
+      exec('ps aux | grep "ngrok http" | grep -v grep', (err, stdout) => {
+        resolve(!err && stdout.trim().length > 0);
+      });
+    });
+  }
+
+  router.get('/api/ngrok/status', async (_req: Request, res: Response) => {
+    try {
+      const externalRunning = await detectExternalNgrok();
+      if (externalRunning && ngrokStatus === 'stopped') {
+        ngrokStatus = 'running';
+      }
+      res.json({
+        status: ngrokStatus,
+        domain: ngrokDomain,
+        url: `https://${ngrokDomain}`,
+        error: ngrokError,
+      });
+    } catch (error) {
+      res.status(500).json({ error: String(error) });
+    }
+  });
+
+  router.post('/api/ngrok/start', async (_req: Request, res: Response): Promise<void> => {
+    try {
+      if (ngrokStatus === 'running') {
+        res.json({ success: true, message: 'ngrok is already running', status: 'running' });
+        return;
+      }
+
+      // Check if already running externally
+      const externalRunning = await detectExternalNgrok();
+      if (externalRunning) {
+        ngrokStatus = 'running';
+        res.json({ success: true, message: 'ngrok is already running (external)', status: 'running' });
+        return;
+      }
+
+      ngrokStatus = 'starting';
+      ngrokError = null;
+
+      ngrokProcess = exec(
+        `ngrok http ${ngrokPort} --url=${ngrokDomain} --log=stdout --log-format=json`,
+        { env: { ...process.env } },
+      );
+
+      // Monitor stdout for tunnel started confirmation
+      let started = false;
+      ngrokProcess.stdout?.on('data', (data: string) => {
+        if (!started && data.includes('started tunnel')) {
+          started = true;
+          ngrokStatus = 'running';
+          logger.info('ngrok tunnel started', { domain: ngrokDomain });
+        }
+      });
+
+      ngrokProcess.stderr?.on('data', (data: string) => {
+        logger.warn('ngrok stderr', { data: data.toString().trim() });
+      });
+
+      ngrokProcess.on('exit', (code) => {
+        ngrokStatus = 'stopped';
+        ngrokProcess = null;
+        if (code !== 0 && code !== null) {
+          ngrokError = `ngrok exited with code ${code}`;
+          logger.error('ngrok process exited', { code });
+        }
+      });
+
+      // Wait briefly for startup
+      await new Promise(resolve => setTimeout(resolve, 3000));
+
+      const currentStatus = ngrokStatus as string;
+      res.json({
+        success: true,
+        message: currentStatus === 'running' ? 'ngrok tunnel started' : 'ngrok is starting...',
+        status: ngrokStatus,
+        url: `https://${ngrokDomain}`,
+      });
+    } catch (error) {
+      ngrokStatus = 'error';
+      ngrokError = String(error);
+      res.status(500).json({ error: String(error) });
+    }
+  });
+
+  router.post('/api/ngrok/stop', (_req: Request, res: Response): void => {
+    try {
+      if (ngrokProcess) {
+        ngrokProcess.kill('SIGTERM');
+        ngrokProcess = null;
+        ngrokStatus = 'stopped';
+        ngrokError = null;
+        logger.info('ngrok tunnel stopped via dashboard');
+        res.json({ success: true, message: 'ngrok stopped', status: 'stopped' });
+        return;
+      }
+
+      // Try to kill external ngrok processes targeting our domain
+      exec(`ps aux | grep "ngrok http" | grep "${ngrokDomain}" | grep -v grep | awk '{print $2}'`, (_err, stdout) => {
+        const pids = stdout.trim().split('\n').filter(Boolean);
+        if (pids.length > 0) {
+          pids.forEach(pid => {
+            exec(`kill ${pid}`);
+          });
+          ngrokStatus = 'stopped';
+          ngrokError = null;
+          logger.info('External ngrok tunnel stopped via dashboard', { pids });
+          res.json({ success: true, message: 'ngrok stopped', status: 'stopped' });
+          return;
+        }
+        res.json({ success: true, message: 'ngrok was not running', status: 'stopped' });
+      });
+    } catch (error) {
+      res.status(500).json({ error: String(error) });
     }
   });
 
@@ -1216,6 +1402,37 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
   // Topology API Routes (live system map)
   // ==============================================
 
+  router.get('/api/audit', (req: Request, res: Response) => {
+    const limit = Math.min(parseInt(String(req.query.limit ?? '100'), 10) || 100, 500);
+    const eventType = req.query.eventType as string | undefined;
+    if (!auditLogger) {
+      res.json({ events: [], message: 'Audit logger not configured' });
+      return;
+    }
+    res.json({
+      events: auditLogger.getRecentEvents(limit, eventType as Parameters<AuditLogger['getRecentEvents']>[1]),
+      counts: auditLogger.getEventCounts(),
+      fetchedAt: new Date().toISOString(),
+    });
+  });
+
+  router.get('/api/observability', (_req: Request, res: Response) => {
+    const runbooksPath = path.join(path.dirname(fileURLToPath(import.meta.url)), '../../config/runbooks.json');
+    let runbooks: unknown[] = [];
+    if (fs.existsSync(runbooksPath)) {
+      runbooks = JSON.parse(fs.readFileSync(runbooksPath, 'utf-8')) as unknown[];
+    }
+
+    res.json({
+      fetchedAt: new Date().toISOString(),
+      healthTimeline: healthTimeline?.getAllBackendHealth() ?? [],
+      metrics: metricsCollector?.getSummary() ?? null,
+      analytics: toolAnalytics?.getSummary() ?? null,
+      auditCounts: auditLogger?.getEventCounts() ?? {},
+      runbooks,
+    });
+  });
+
   router.get('/api/topology', (_req: Request, res: Response) => {
     res.json(generateTopology(backendManager));
   });
@@ -1551,7 +1768,30 @@ function getDashboardHTML(): string {
       --primary: var(--accent);
       --warning-rgb: 251, 191, 36;
     }
-    
+
+    .glass-panel {
+      background: rgba(17, 17, 20, 0.7);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 12px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+    }
+    .glass-panel-hover {
+      background: rgba(17, 17, 20, 0.7);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
+      border: 1px solid rgba(255, 255, 255, 0.06);
+      border-radius: 12px;
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03);
+      transition: border-color 0.2s ease, box-shadow 0.2s ease;
+      cursor: pointer;
+    }
+    .glass-panel-hover:hover {
+      border-color: rgba(255, 255, 255, 0.10);
+      box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.03), 0 4px 24px rgba(0, 0, 0, 0.3);
+    }
+
     * {
       margin: 0;
       padding: 0;
@@ -1603,28 +1843,21 @@ function getDashboardHTML(): string {
       max-width: 1440px;
       margin: 0 auto;
       padding: clamp(1rem, 2.3vw, 2.25rem);
+      padding-top: 0.75rem;
     }
     
     header {
+      position: sticky;
+      top: 2px; /* Below the amber gradient strip */
+      z-index: 50;
       display: flex;
       justify-content: space-between;
       align-items: center;
-      margin-bottom: 1.5rem;
-      padding: 1.5rem 2rem;
-      background: var(--bg-card);
-      border-radius: var(--radius-lg);
-      border: 1px solid var(--border);
-      position: relative;
-    }
-
-    header::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 1px;
-      background: linear-gradient(90deg, transparent, rgba(226, 169, 59, 0.4), transparent);
+      height: 56px;
+      padding: 0 1.5rem;
+      background: var(--bg-primary);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
+      margin-bottom: 0;
     }
 
     .logo-section {
@@ -1634,107 +1867,74 @@ function getDashboardHTML(): string {
     }
 
     .logo-icon {
-      width: 44px;
-      height: 44px;
-      background: linear-gradient(135deg, #E2A93B, #D4942E);
-      border-radius: var(--radius-md);
+      width: 32px;
+      height: 32px;
+      background: rgba(226, 169, 59, 0.10);
+      border: 1px solid rgba(226, 169, 59, 0.20);
+      border-radius: 6px;
       display: flex;
       align-items: center;
       justify-content: center;
-      font-size: 1.375rem;
-      box-shadow: 0 4px 16px rgba(226, 169, 59, 0.25);
     }
+    .logo-icon svg { stroke: #E2A93B; }
 
     h1 {
-      font-size: 1.45rem;
-      font-weight: 700;
+      font-size: 1.125rem;
+      font-weight: 600;
+      line-height: 1.2;
       color: var(--text-primary);
       letter-spacing: -0.03em;
     }
 
     .header-subtitle {
-      font-size: 0.74rem;
+      font-size: 10px;
+      letter-spacing: 0.2em;
+      line-height: 1;
+      margin-top: 2px;
       color: var(--text-muted);
-      margin-top: 0.125rem;
-      letter-spacing: 0.08em;
       text-transform: uppercase;
       font-family: 'IBM Plex Mono', monospace;
     }
     
     .stats {
       display: flex;
-      gap: 0.75rem;
+      align-items: center;
+      gap: 0.5rem;
     }
-
     .stat {
+      display: flex;
+      align-items: center;
+      gap: 0.5rem;
+      padding: 0.25rem 0.625rem;
+      border-radius: 6px;
       background: rgba(255, 255, 255, 0.03);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
-      padding: 0.875rem 1.25rem;
-      border-radius: 14px;
-      border: 1px solid rgba(255, 255, 255, 0.08);
-      position: relative;
-      overflow: hidden;
-      transition: all 0.3s ease;
-      min-width: 100px;
-      text-align: center;
+      border: 1px solid rgba(255, 255, 255, 0.06);
     }
-
-    .stat:hover {
-      border-color: rgba(255, 255, 255, 0.15);
-      transform: translateY(-2px);
-      background: rgba(255, 255, 255, 0.06);
+    .stat-dot {
+      width: 6px;
+      height: 6px;
+      border-radius: 50%;
+      flex-shrink: 0;
     }
-
-    .stat::before {
-      content: '';
-      position: absolute;
-      top: 0;
-      left: 0;
-      right: 0;
-      height: 2px;
-      background: var(--gradient-1);
-      opacity: 0;
-      transition: opacity 0.3s ease;
-    }
-
-    .stat:hover::before {
-      opacity: 1;
-    }
-
-    .stat-value {
-      font-size: 1.5rem;
-      font-weight: 700;
-      line-height: 1.2;
-      color: #fff;
-    }
-
-    .stat:nth-child(1) .stat-value {
-      background: linear-gradient(135deg, #34D399, #10B981);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-    .stat:nth-child(2) .stat-value {
-      background: linear-gradient(135deg, #E2A93B, #EBB94E);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-    .stat:nth-child(3) .stat-value {
-      background: linear-gradient(135deg, #5B8DEF, #7BA4F5);
-      -webkit-background-clip: text;
-      -webkit-text-fill-color: transparent;
-      background-clip: text;
-    }
-
+    .stat-dot.success { background: #34D399; }
+    .stat-dot.warning { background: #FBBF24; }
+    .stat-dot.amber { background: #E2A93B; }
+    .stat-dot.blue { background: #5B8DEF; }
+    .stat-dot.pulse { animation: dotPulse 2s ease-in-out infinite; }
+    @keyframes dotPulse { 0%, 100% { opacity: 1; } 50% { opacity: 0.4; } }
     .stat-label {
-      font-size: 0.72rem;
-      color: var(--text-secondary);
+      font-size: 10px;
+      font-family: 'IBM Plex Mono', monospace;
+      letter-spacing: 0.1em;
       text-transform: uppercase;
-      letter-spacing: 0.08em;
+      color: var(--text-secondary);
+    }
+    .stat-value {
+      font-size: 0.75rem;
+      font-family: 'IBM Plex Mono', monospace;
       font-weight: 500;
-      margin-top: 0.2rem;
+      color: var(--text-primary);
+      margin-left: 2px;
     }
     
     .controls {
@@ -1873,7 +2073,9 @@ function getDashboardHTML(): string {
     }
     
     .backend-card {
-      background: var(--bg-card);
+      background: rgba(17, 17, 20, 0.7);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
       border: 1px solid var(--border);
       border-radius: var(--radius-lg);
       margin-bottom: 0.75rem;
@@ -2239,10 +2441,6 @@ function getDashboardHTML(): string {
       outline-offset: 2px;
     }
 
-    .stat {
-      position: relative;
-    }
-
     .quick-actions {
       display: flex;
       gap: 0.375rem;
@@ -2590,39 +2788,6 @@ function getDashboardHTML(): string {
     }
 
     /* Responsive */
-/* Tab Navigation */
-    .tab-nav {
-      display: flex;
-      gap: 0.5rem;
-      margin-bottom: 1.5rem;
-      border-bottom: 1px solid var(--border);
-      padding-bottom: 0;
-    }
-
-    .tab-btn {
-      padding: 0.875rem 1.5rem;
-      background: transparent;
-      border: none;
-      border-bottom: 2px solid transparent;
-      color: var(--text-muted);
-      font-size: 0.9rem;
-      font-weight: 600;
-      font-family: inherit;
-      cursor: pointer;
-      transition: all 0.2s ease;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
-    }
-
-    .tab-btn:hover {
-      color: var(--text-primary);
-    }
-
-    .tab-btn.active {
-      color: var(--accent);
-      border-bottom-color: var(--accent);
-    }
 
     .tab-content {
       display: none;
@@ -2641,9 +2806,9 @@ function getDashboardHTML(): string {
     }
 
     .usage-stat {
-      background: var(--bg-card);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      background: rgba(17, 17, 20, 0.7);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
       padding: 1.25rem;
       border-radius: 16px;
       border: 1px solid var(--border);
@@ -2712,9 +2877,9 @@ function getDashboardHTML(): string {
     }
 
     .chart-card {
-      background: var(--bg-card);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      background: rgba(17, 17, 20, 0.7);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
       padding: 1.5rem;
       border-radius: 20px;
       border: 1px solid var(--border);
@@ -2907,9 +3072,9 @@ function getDashboardHTML(): string {
     }
 
     .memory-stat {
-      background: var(--bg-card);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      background: rgba(17, 17, 20, 0.7);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
       padding: 1.25rem;
       border-radius: 16px;
       border: 1px solid var(--border);
@@ -2963,9 +3128,9 @@ function getDashboardHTML(): string {
     }
 
     .memory-session-card {
-      background: var(--bg-card);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      background: rgba(17, 17, 20, 0.7);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
       border: 1px solid var(--border);
       border-radius: 16px;
       padding: 1.25rem;
@@ -3199,9 +3364,9 @@ function getDashboardHTML(): string {
     }
 
     .skills-stat {
-      background: var(--bg-card);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      background: rgba(17, 17, 20, 0.7);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
       padding: 1rem 1.25rem;
       border-radius: 14px;
       border: 1px solid var(--border);
@@ -3235,7 +3400,9 @@ function getDashboardHTML(): string {
     /* Helper Agents Tab */
     .helper-router-status {
       border: 1px solid var(--border);
-      background: var(--bg-card);
+      background: rgba(17, 17, 20, 0.7);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
       border-radius: 14px;
       padding: 1rem 1.2rem;
       margin-bottom: 1rem;
@@ -3257,7 +3424,9 @@ function getDashboardHTML(): string {
 
     .helper-test-panel {
       border: 1px solid var(--border);
-      background: var(--bg-card);
+      background: rgba(17, 17, 20, 0.7);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
       border-radius: 14px;
       padding: 1rem;
       margin-bottom: 1rem;
@@ -3326,7 +3495,9 @@ function getDashboardHTML(): string {
     }
 
     .helper-agent-card {
-      background: var(--bg-card);
+      background: rgba(17, 17, 20, 0.7);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
       border: 1px solid var(--border);
       border-radius: 14px;
       padding: 1rem;
@@ -3484,9 +3655,9 @@ function getDashboardHTML(): string {
     }
 
     .skill-card {
-      background: var(--bg-card);
-      backdrop-filter: blur(20px);
-      -webkit-backdrop-filter: blur(20px);
+      background: rgba(17, 17, 20, 0.7);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
       border: 1px solid var(--border);
       border-radius: 16px;
       padding: 1.25rem;
@@ -3732,29 +3903,25 @@ function getDashboardHTML(): string {
       }
 
       header {
-        flex-direction: column;
-        gap: 1rem;
-        align-items: flex-start;
+        flex-wrap: wrap;
+        gap: 0.5rem;
+        height: auto;
+        padding: 0.5rem 1rem;
       }
 
       .header-actions {
         width: 100%;
         justify-content: flex-start;
-        gap: 0.75rem;
+        gap: 0.5rem;
+        flex-wrap: wrap;
       }
 
       .stats {
-        width: 100%;
+        flex-wrap: wrap;
       }
 
       .stat {
-        flex: 1 1 110px;
-        min-width: 110px;
-        min-height: 44px;
-      }
-
-      .stat:hover {
-        transform: none;
+        flex: 0 0 auto;
       }
 
       .tab-nav {
@@ -3820,7 +3987,9 @@ function getDashboardHTML(): string {
     }
 
     .settings-card {
-      background: var(--bg-card);
+      background: rgba(17, 17, 20, 0.7);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
       border: 1px solid var(--border);
       border-radius: var(--radius-md);
       overflow: hidden;
@@ -4171,7 +4340,9 @@ function getDashboardHTML(): string {
     }
 
     .overview-card {
-      background: var(--bg-card);
+      background: rgba(17, 17, 20, 0.7);
+      backdrop-filter: blur(4px);
+      -webkit-backdrop-filter: blur(4px);
       border: 1px solid var(--border);
       border-radius: var(--radius-md);
       padding: 1.25rem;
@@ -4383,61 +4554,54 @@ function getDashboardHTML(): string {
 
     /* Professional Tab Navigation - Obsidian Observatory */
     .tab-nav {
+      position: sticky;
+      top: 58px; /* Below header */
+      z-index: 40;
       display: flex;
-      gap: 0.125rem;
-      margin-bottom: 1.5rem;
-      background: var(--bg-secondary);
-      padding: 0.375rem;
-      border-radius: var(--radius-md);
-      border: 1px solid var(--border);
+      align-items: center;
+      gap: 1.5rem;
+      padding: 0 1.5rem;
+      background: rgba(10, 10, 12, 0.95);
+      backdrop-filter: blur(8px);
+      -webkit-backdrop-filter: blur(8px);
+      border-bottom: 1px solid rgba(255, 255, 255, 0.06);
       overflow-x: auto;
-      scrollbar-width: thin;
+      scrollbar-width: none;
+      margin-bottom: 1.5rem;
     }
-
+    .tab-nav::-webkit-scrollbar { display: none; }
     .tab-btn {
-      padding: 0.625rem 1rem;
+      position: relative;
+      padding: 0.75rem 0.25rem;
       background: transparent;
       border: none;
-      border-radius: var(--radius-sm);
       color: var(--text-muted);
-      font-size: 0.8rem;
+      font-size: 0.875rem;
       font-weight: 500;
       font-family: inherit;
       cursor: pointer;
-      transition: all 0.2s ease;
-      display: flex;
-      align-items: center;
-      gap: 0.5rem;
+      transition: color 0.2s ease;
       white-space: nowrap;
       flex: 0 0 auto;
+      display: flex;
+      align-items: center;
+      gap: 0.375rem;
     }
-
-    .tab-btn:hover {
-      color: var(--text-secondary);
-      background: var(--bg-glass);
+    .tab-btn:hover { color: var(--text-secondary); }
+    .tab-btn.active { color: var(--text-primary); }
+    .tab-btn.active::after {
+      content: '';
+      position: absolute;
+      bottom: 0;
+      left: 0;
+      right: 0;
+      height: 2px;
+      background: #E2A93B;
+      border-radius: 1px;
     }
-
-    .tab-btn.active {
-      color: #E2A93B;
-      background: rgba(226, 169, 59, 0.08);
-      box-shadow: var(--shadow-sm), inset 0 0 0 1px rgba(226, 169, 59, 0.15);
-    }
-
-    .tab-btn svg {
-      width: 14px;
-      height: 14px;
-      opacity: 0.5;
-      transition: opacity 0.2s ease;
-    }
-
-    .tab-btn:hover svg {
-      opacity: 0.7;
-    }
-
-    .tab-btn.active svg {
-      opacity: 1;
-      stroke: #E2A93B;
-    }
+    .tab-btn svg { width: 14px; height: 14px; opacity: 0.5; }
+    .tab-btn:hover svg { opacity: 0.7; }
+    .tab-btn.active svg { opacity: 1; stroke: #E2A93B; }
 
     @media (prefers-reduced-motion: reduce) {
       *, *::before, *::after {
@@ -4495,7 +4659,11 @@ function getDashboardHTML(): string {
   <div class="container">
     <header>
       <div class="logo-section">
-        <div class="logo-icon"><svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#0A0A0C" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polygon points="13 2 3 14 12 14 11 22 21 10 12 10 13 2"></polygon></svg></div>
+        <div class="logo-icon">
+          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M21 16V8a2 2 0 0 0-1-1.73l-7-4a2 2 0 0 0-2 0l-7 4A2 2 0 0 0 3 8v8a2 2 0 0 0 1 1.73l7 4a2 2 0 0 0 2 0l7-4A2 2 0 0 0 21 16z"></path>
+          </svg>
+        </div>
         <div>
           <h1>MCP Gateway</h1>
           <div class="header-subtitle">Unified AI Tool Orchestration</div>
@@ -4504,16 +4672,19 @@ function getDashboardHTML(): string {
       <div class="header-actions">
         <div class="stats">
           <div class="stat">
-            <div class="stat-value" id="enabled-count">-</div>
-            <div class="stat-label">Enabled Tools</div>
+            <span class="stat-dot success pulse"></span>
+            <span class="stat-label">Enabled</span>
+            <span class="stat-value" id="enabled-count">-</span>
           </div>
           <div class="stat">
-            <div class="stat-value" id="total-count">-</div>
-            <div class="stat-label">Total Tools</div>
+            <span class="stat-dot amber"></span>
+            <span class="stat-label">Total</span>
+            <span class="stat-value" id="total-count">-</span>
           </div>
           <div class="stat">
-            <div class="stat-value" id="backends-count">-</div>
-            <div class="stat-label">Backends</div>
+            <span class="stat-dot blue"></span>
+            <span class="stat-label">Backends</span>
+            <span class="stat-value" id="backends-count">-</span>
           </div>
         </div>
         <button class="btn btn-success" onclick="openAddServerModal()">
@@ -4556,6 +4727,10 @@ function getDashboardHTML(): string {
       <button class="tab-btn" data-tab="skills" id="tab-btn-skills" role="tab" aria-selected="false" aria-controls="tab-skills" tabindex="-1" onclick="switchTab('skills')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polygon points="12 2 2 7 12 12 22 7 12 2"></polygon><polyline points="2 17 12 22 22 17"></polyline><polyline points="2 12 12 17 22 12"></polyline></svg>
         Skills
+      </button>
+      <button class="tab-btn" data-tab="observability" id="tab-btn-observability" role="tab" aria-selected="false" aria-controls="tab-observability" tabindex="-1" onclick="switchTab('observability'); loadObservability();">
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><polyline points="22 12 18 12 15 21 9 3 6 12 2 12"></polyline></svg>
+        Observability
       </button>
       <button class="tab-btn" data-tab="settings" id="tab-btn-settings" role="tab" aria-selected="false" aria-controls="tab-settings" tabindex="-1" onclick="switchTab('settings')">
         <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="3"></circle><path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 0 1 0 2.83 2 2 0 0 1-2.83 0l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-2 2 2 2 0 0 1-2-2v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83 0 2 2 0 0 1 0-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1-2-2 2 2 0 0 1 2-2h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 0-2.83 2 2 0 0 1 2.83 0l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 2-2 2 2 0 0 1 2 2v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 0 2 2 0 0 1 0 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 2 2 2 2 0 0 1-2 2h-.09a1.65 1.65 0 0 0-1.51 1z"></path></svg>
@@ -4961,6 +5136,36 @@ function getDashboardHTML(): string {
       </div>
     </div>
 
+    <!-- Observability Tab -->
+    <div id="tab-observability" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-observability" hidden>
+      <div class="section-header">
+        <div>
+          <div class="section-title">Observability Console</div>
+          <div class="section-subtitle">Health timeline, metrics, audit trail, and runbooks — refreshed on demand</div>
+        </div>
+        <button class="btn btn-secondary" onclick="loadObservability()">Refresh</button>
+      </div>
+      <div id="observability-freshness" class="section-subtitle" style="margin-bottom: 1rem;"></div>
+      <div class="overview-grid">
+        <div class="overview-card">
+          <div class="overview-card-header"><div class="overview-card-title">Metrics Summary</div></div>
+          <div class="overview-card-content"><pre id="obs-metrics" style="white-space:pre-wrap;font-size:12px;">Loading...</pre></div>
+        </div>
+        <div class="overview-card">
+          <div class="overview-card-header"><div class="overview-card-title">Health Timeline</div></div>
+          <div class="overview-card-content"><pre id="obs-health" style="white-space:pre-wrap;font-size:12px;">Loading...</pre></div>
+        </div>
+        <div class="overview-card">
+          <div class="overview-card-header"><div class="overview-card-title">Recent Audit Events</div></div>
+          <div class="overview-card-content"><pre id="obs-audit" style="white-space:pre-wrap;font-size:12px;">Loading...</pre></div>
+        </div>
+        <div class="overview-card">
+          <div class="overview-card-header"><div class="overview-card-title">Runbooks</div></div>
+          <div class="overview-card-content"><pre id="obs-runbooks" style="white-space:pre-wrap;font-size:12px;">Loading...</pre></div>
+        </div>
+      </div>
+    </div>
+
     <!-- Settings Tab -->
     <div id="tab-settings" class="tab-content" role="tabpanel" aria-labelledby="tab-btn-settings" hidden>
       <div class="section-header">
@@ -5021,7 +5226,52 @@ function getDashboardHTML(): string {
       </div>
 
       <!-- Environment Override Notice -->
-      <div class="settings-section" id="env-override-notice" style="display: none;">
+      <div class="settings-section" id="env-override-notice" style="display: none;"></div>
+
+      <!-- ngrok Tunnel Control -->
+      <div class="settings-section">
+        <div class="settings-card">
+          <div class="settings-card-header">
+            <div class="settings-card-icon" style="background: linear-gradient(135deg, #6366f1, #4f46e5);">
+              <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><path d="M12 2L2 7l10 5 10-5-10-5z"/><path d="M2 17l10 5 10-5"/><path d="M2 12l10 5 10-5"/></svg>
+            </div>
+            <div class="settings-card-title">
+              <h3>ngrok Tunnel</h3>
+              <p>Expose MCP Gateway publicly via <code id="ngrok-domain-display">loading...</code></p>
+            </div>
+            <label class="toggle-switch">
+              <input type="checkbox" id="ngrok-toggle" onchange="toggleNgrok(this.checked)">
+              <span class="toggle-slider"></span>
+            </label>
+          </div>
+          <div class="settings-card-body">
+            <div class="settings-info">
+              <div class="settings-info-item">
+                <span class="settings-label">Status:</span>
+                <span class="settings-value" id="ngrok-status-text">Checking...</span>
+              </div>
+              <div class="settings-info-item">
+                <span class="settings-label">Public URL:</span>
+                <span class="settings-value"><a id="ngrok-url-link" href="#" target="_blank" style="color: var(--accent-primary);">-</a></span>
+              </div>
+              <div class="settings-info-item">
+                <span class="settings-label">Cost:</span>
+                <span class="settings-value highlight-green">~$0.04/hr when active</span>
+              </div>
+            </div>
+            <div class="settings-description">
+              <p><strong>On-demand tunnel for ChatGPT & external MCP clients.</strong></p>
+              <p>Start the tunnel only when you need external access. This saves your ngrok credit — stop it when done.</p>
+              <p class="settings-warning">
+                <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
+                Runs at ~$0.04/hr on Pay-as-you-go. Toggle off when not in use.
+              </p>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Environment Override Notice (original) -->
         <div class="settings-notice warning">
           <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round"><circle cx="12" cy="12" r="10"></circle><line x1="12" y1="8" x2="12" y2="12"></line><line x1="12" y1="16" x2="12.01" y2="16"></line></svg>
           <div>
@@ -5567,6 +5817,10 @@ function getDashboardHTML(): string {
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><path d="M11 4H4a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h14a2 2 0 0 0 2-2v-7"></path><path d="M18.5 2.5a2.121 2.121 0 0 1 3 3L12 15l-4 1 1-4 9.5-9.5z"></path></svg>
                     Edit
                   </button>
+                  \${isDisconnected ? \`<button class="btn btn-secondary btn-small" onclick="event.stopPropagation(); reconnectBackend('\${backend.id}')">
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="23 4 23 10 17 10"></polyline><path d="M20.49 15a9 9 0 1 1-2.12-9.36L23 10"></path></svg>
+                    Reconnect
+                  </button>\` : ''}
                   <button class="btn btn-danger btn-small" onclick="event.stopPropagation(); openDeleteModal('\${backend.id}')">
                     <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5"><polyline points="3 6 5 6 21 6"></polyline><path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path></svg>
                   </button>
@@ -5842,6 +6096,39 @@ function getDashboardHTML(): string {
         }
       } catch (err) {
         showToast('Fabric token check failed', true);
+      }
+    }
+
+    async function reconnectBackend(backendId) {
+      try {
+        showToast('Reconnecting ' + backendId + '...');
+        const res = await fetch('/api/backends/' + encodeURIComponent(backendId) + '/reconnect', { method: 'POST' });
+        const data = await res.json();
+        if (!res.ok) throw new Error(data.error || 'Reconnect failed');
+        showToast('Reconnected ' + backendId, 'success');
+        await loadData();
+      } catch (err) {
+        showToast('Reconnect failed: ' + (err.message || err), 'error');
+      }
+    }
+
+    async function loadObservability() {
+      const freshness = document.getElementById('observability-freshness');
+      try {
+        const [obsRes, auditRes] = await Promise.all([
+          fetch('/dashboard/api/observability'),
+          fetch('/dashboard/api/audit?limit=20'),
+        ]);
+        const obs = await obsRes.json();
+        const audit = await auditRes.json();
+        document.getElementById('obs-metrics').textContent = JSON.stringify(obs.metrics, null, 2);
+        document.getElementById('obs-health').textContent = JSON.stringify(obs.healthTimeline, null, 2);
+        document.getElementById('obs-audit').textContent = JSON.stringify(audit.events, null, 2);
+        document.getElementById('obs-runbooks').textContent = JSON.stringify(obs.runbooks, null, 2);
+        if (freshness) freshness.textContent = 'Last refreshed: ' + (obs.fetchedAt || new Date().toISOString());
+      } catch (err) {
+        if (freshness) freshness.textContent = 'Failed to load observability data';
+        showToast('Observability load failed', 'error');
       }
     }
 
@@ -7763,6 +8050,81 @@ function getDashboardHTML(): string {
         console.error('Failed to load gateway settings:', err);
       }
     }
+
+    // ngrok Tunnel Management
+    async function loadNgrokStatus() {
+      try {
+        const res = await fetch('/dashboard/api/ngrok/status');
+        const data = await res.json();
+        const toggle = document.getElementById('ngrok-toggle');
+        const statusText = document.getElementById('ngrok-status-text');
+        const urlLink = document.getElementById('ngrok-url-link');
+        const domainDisplay = document.getElementById('ngrok-domain-display');
+
+        if (domainDisplay) domainDisplay.textContent = data.domain;
+        if (toggle) toggle.checked = data.status === 'running';
+
+        if (statusText) {
+          const statusMap = {
+            running: '<span style="color: var(--success-color);">● Running</span>',
+            starting: '<span style="color: var(--warning-color);">◐ Starting...</span>',
+            stopped: '<span style="color: var(--text-tertiary);">○ Stopped</span>',
+            error: '<span style="color: var(--danger-color);">✕ Error: ' + (data.error || 'Unknown') + '</span>',
+          };
+          statusText.innerHTML = statusMap[data.status] || data.status;
+        }
+
+        if (urlLink) {
+          if (data.status === 'running') {
+            urlLink.href = data.url + '/mcp';
+            urlLink.textContent = data.url + '/mcp';
+          } else {
+            urlLink.href = '#';
+            urlLink.textContent = 'Not active';
+          }
+        }
+      } catch (err) {
+        console.error('Failed to load ngrok status:', err);
+      }
+    }
+
+    async function toggleNgrok(enabled) {
+      const toggle = document.getElementById('ngrok-toggle');
+      const statusText = document.getElementById('ngrok-status-text');
+
+      try {
+        if (enabled) {
+          if (statusText) statusText.innerHTML = '<span style="color: var(--warning-color);">◐ Starting...</span>';
+          const res = await fetch('/dashboard/api/ngrok/start', { method: 'POST' });
+          const data = await res.json();
+          if (data.success) {
+            showToast('ngrok tunnel started! URL: ' + (data.url || ''));
+          } else {
+            showToast('Failed to start ngrok: ' + (data.error || 'Unknown'), 'error');
+            if (toggle) toggle.checked = false;
+          }
+        } else {
+          const res = await fetch('/dashboard/api/ngrok/stop', { method: 'POST' });
+          const data = await res.json();
+          if (data.success) {
+            showToast('ngrok tunnel stopped');
+          } else {
+            showToast('Failed to stop ngrok', 'error');
+            if (toggle) toggle.checked = true;
+          }
+        }
+        // Refresh status after a brief delay
+        setTimeout(loadNgrokStatus, 1500);
+      } catch (err) {
+        console.error('Failed to toggle ngrok:', err);
+        showToast('Failed to toggle ngrok tunnel', 'error');
+        if (toggle) toggle.checked = !enabled;
+      }
+    }
+
+    // Load ngrok status on page load and refresh periodically
+    loadNgrokStatus();
+    setInterval(loadNgrokStatus, 15000);
 
     async function toggleLiteMode(enabled) {
       try {
