@@ -142,9 +142,10 @@ async function main(): Promise<void> {
     app.use('/api/code', createCodeExecutionRoutes(new BackendManager(), audit));
 
     const server = app.listen(0);
+    let baseUrl: string | undefined;
     try {
       const { port } = server.address() as AddressInfo;
-      const baseUrl = `http://127.0.0.1:${port}/api/code`;
+      baseUrl = `http://127.0.0.1:${port}/api/code`;
       const createResponse = await fetch(`${baseUrl}/skills`, {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
@@ -177,6 +178,9 @@ async function main(): Promise<void> {
       assert.ok(body.hints?.includes('Required scope: code:execute'));
       assert.equal(audit.getRecentEvents(10, 'policy_deny').length, 1);
     } finally {
+      if (baseUrl) {
+        await fetch(`${baseUrl}/skills/rest_authz_skill`, { method: 'DELETE' }).catch(() => undefined);
+      }
       await new Promise<void>((resolve, reject) => {
         server.close(error => error ? reject(error) : resolve());
       });

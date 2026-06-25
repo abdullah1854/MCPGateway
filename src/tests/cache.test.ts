@@ -65,7 +65,7 @@ async function main(): Promise<void> {
     assert.equal(ctx.getStats().bytesSaved, expectedBytesSaved);
   });
 
-  await runTest('CACHE-003: REST tool call cache is on the authorized hot path', async () => {
+  await runTest('CACHE-003: REST tool call cache is explicit opt-in', async () => {
     let backendCalls = 0;
     const backendManager = {
       async callTool(_toolName: string, _args: unknown) {
@@ -94,23 +94,38 @@ async function main(): Promise<void> {
     try {
       const { port } = server.address() as AddressInfo;
       const url = `http://127.0.0.1:${port}/api/code/tools/demo_tool/call`;
-      const init = {
+      const uncachedInit = {
         method: 'POST',
         headers: { 'content-type': 'application/json' },
         body: JSON.stringify({ args: { b: 1, a: { y: 2, x: 1 } }, smart: false }),
       };
+      const cachedInit = {
+        ...uncachedInit,
+        body: JSON.stringify({ args: { b: 1, a: { y: 2, x: 1 } }, smart: false, cache: true }),
+      };
 
-      const first = await fetch(url, init);
-      const second = await fetch(url, init);
+      const first = await fetch(url, uncachedInit);
+      const second = await fetch(url, uncachedInit);
+      const third = await fetch(url, cachedInit);
+      const fourth = await fetch(url, cachedInit);
       const firstBody = await first.json() as { cache?: { hit: boolean }; result?: unknown };
       const secondBody = await second.json() as { cache?: { hit: boolean }; result?: unknown };
+      const thirdBody = await third.json() as { cache?: { enabled: boolean; hit: boolean }; result?: unknown };
+      const fourthBody = await fourth.json() as { cache?: { enabled: boolean; hit: boolean }; result?: unknown };
 
       assert.equal(first.status, 200);
       assert.equal(second.status, 200);
+      assert.equal(third.status, 200);
+      assert.equal(fourth.status, 200);
       assert.equal(firstBody.cache?.hit, false);
-      assert.equal(secondBody.cache?.hit, true);
-      assert.deepEqual(firstBody.result, secondBody.result);
-      assert.equal(backendCalls, 1);
+      assert.equal(secondBody.cache?.hit, false);
+      assert.notDeepEqual(firstBody.result, secondBody.result);
+      assert.equal(thirdBody.cache?.enabled, true);
+      assert.equal(thirdBody.cache?.hit, false);
+      assert.equal(fourthBody.cache?.enabled, true);
+      assert.equal(fourthBody.cache?.hit, true);
+      assert.deepEqual(thirdBody.result, fourthBody.result);
+      assert.equal(backendCalls, 3);
     } finally {
       await new Promise<void>((resolve, reject) => {
         server.close(error => error ? reject(error) : resolve());

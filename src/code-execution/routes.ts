@@ -394,10 +394,11 @@ export function createCodeExecutionRoutes(backendManager: BackendManager, auditL
   router.post('/tools/:name/call', async (req: Request, res: Response) => {
     try {
       const { name } = req.params;
-      const { args = {}, filter, smart } = req.body as {
+      const { args = {}, filter, smart, cache } = req.body as {
         args?: unknown;
         filter?: unknown;
         smart?: unknown;
+        cache?: unknown;
       };
 
       if (smart !== undefined && typeof smart !== 'boolean') {
@@ -442,11 +443,15 @@ export function createCodeExecutionRoutes(backendManager: BackendManager, auditL
 
       const tokenizer = getPIITokenizerForSession(getSessionId(req));
       const detokenizedArgs = tokenizer ? tokenizer.detokenizeObject(args) : args;
-      const cacheKey = ResultCache.generateKey(name, {
-        subject: authorization.subject,
-        args: detokenizedArgs,
-      });
-      const cachedResult = resultCache.get(cacheKey);
+      const cacheEnabled = cache === true ||
+        (typeof cache === 'object' && cache !== null && (cache as { enabled?: unknown }).enabled === true);
+      const cacheKey = cacheEnabled
+        ? ResultCache.generateKey(name, {
+          subject: authorization.subject,
+          args: detokenizedArgs,
+        })
+        : undefined;
+      const cachedResult = cacheKey ? resultCache.get(cacheKey) : undefined;
       let rawResult: unknown;
 
       if (cachedResult !== undefined) {
@@ -463,7 +468,9 @@ export function createCodeExecutionRoutes(backendManager: BackendManager, auditL
         }
 
         rawResult = response.result;
-        resultCache.set(cacheKey, rawResult);
+        if (cacheKey) {
+          resultCache.set(cacheKey, rawResult);
+        }
       }
 
       // Apply filtering if requested
@@ -482,7 +489,7 @@ export function createCodeExecutionRoutes(backendManager: BackendManager, auditL
       res.json({
         success: true,
         result,
-        cache: { hit: cachedResult !== undefined },
+        cache: { enabled: cacheEnabled, hit: cachedResult !== undefined },
       });
     } catch (error) {
       res.status(500).json({
