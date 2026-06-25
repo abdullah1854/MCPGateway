@@ -28,18 +28,76 @@ interface BackendMetrics {
   lastCallTime: number;
 }
 
+interface MetricsCollectorConfig {
+  maxLatencySamples: number;
+  maxBackendLabels: number;
+}
+
+const DEFAULT_METRICS_CONFIG: MetricsCollectorConfig = {
+  maxLatencySamples: 10_000,
+  maxBackendLabels: 100,
+};
+const OTHER_BACKEND_LABEL = '__other__';
+
+class RingBuffer<T> {
+  private readonly values: Array<T | undefined>;
+  private nextIndex = 0;
+  private count = 0;
+
+  constructor(private readonly capacity: number) {
+    this.values = new Array<T | undefined>(capacity);
+  }
+
+  push(value: T): void {
+    if (this.capacity <= 0) {
+      return;
+    }
+    this.values[this.nextIndex] = value;
+    this.nextIndex = (this.nextIndex + 1) % this.capacity;
+    this.count = Math.min(this.count + 1, this.capacity);
+  }
+
+  toArray(): T[] {
+    const result: T[] = [];
+    for (let i = 0; i < this.count; i++) {
+      const index = (this.nextIndex - this.count + i + this.capacity) % this.capacity;
+      const value = this.values[index];
+      if (value !== undefined) {
+        result.push(value);
+      }
+    }
+    return result;
+  }
+
+  clear(): void {
+    this.values.fill(undefined);
+    this.nextIndex = 0;
+    this.count = 0;
+  }
+
+  get size(): number {
+    return this.count;
+  }
+}
+
 /**
  * Metrics Collector - Tracks and exposes gateway metrics
  */
 export class MetricsCollector {
-  private toolCalls: ToolCallMetric[] = [];
+  private toolCalls: RingBuffer<ToolCallMetric>;
+  private backendLatency = new Map<string, RingBuffer<number>>();
   private backendMetrics = new Map<string, BackendMetrics>();
   private requestCount = 0;
   private errorCount = 0;
   private authFailureCount = 0;
   private rateLimitExceededCount = 0;
   private startTime = Date.now();
-  private maxHistorySize = 10000;
+  private config: MetricsCollectorConfig;
+
+  constructor(config?: Partial<MetricsCollectorConfig>) {
+    this.config = { ...DEFAULT_METRICS_CONFIG, ...config };
+    this.toolCalls = new RingBuffer<ToolCallMetric>(this.config.maxLatencySamples);
+  }
 
   /**
    * Record a tool call
@@ -60,11 +118,6 @@ export class MetricsCollector {
 
     this.toolCalls.push(metric);
 
-    // Trim history if too large
-    if (this.toolCalls.length > this.maxHistorySize) {
-      this.toolCalls = this.toolCalls.slice(-this.maxHistorySize / 2);
-    }
-
     // Update backend metrics
     this.updateBackendMetrics(backend, duration, success);
   }
@@ -73,7 +126,8 @@ export class MetricsCollector {
    * Update aggregated backend metrics
    */
   private updateBackendMetrics(backend: string, duration: number, success: boolean): void {
-    let metrics = this.backendMetrics.get(backend);
+    const backendLabel = this.boundBackendLabel(backend);
+    let metrics = this.backendMetrics.get(backendLabel);
 
     if (!metrics) {
       metrics = {
@@ -84,8 +138,15 @@ export class MetricsCollector {
         avgDuration: 0,
         lastCallTime: 0,
       };
-      this.backendMetrics.set(backend, metrics);
+      this.backendMetrics.set(backendLabel, metrics);
     }
+
+    let latency = this.backendLatency.get(backendLabel);
+    if (!latency) {
+      latency = new RingBuffer<number>(this.config.maxLatencySamples);
+      this.backendLatency.set(backendLabel, latency);
+    }
+    latency.push(duration);
 
     metrics.totalCalls++;
     metrics.totalDuration += duration;
@@ -146,24 +207,11 @@ export class MetricsCollector {
     p95: number;
     p99: number;
   } {
-    let calls = this.toolCalls;
+    const durations = backend
+      ? (this.backendLatency.get(this.boundBackendLabel(backend))?.toArray() ?? [])
+      : this.toolCalls.toArray().map(c => c.duration);
 
-    if (backend) {
-      calls = calls.filter(c => c.backend === backend);
-    }
-
-    if (calls.length === 0) {
-      return { p50: 0, p90: 0, p95: 0, p99: 0 };
-    }
-
-    const durations = calls.map(c => c.duration).sort((a, b) => a - b);
-
-    return {
-      p50: durations[Math.floor(durations.length * 0.5)] || 0,
-      p90: durations[Math.floor(durations.length * 0.9)] || 0,
-      p95: durations[Math.floor(durations.length * 0.95)] || 0,
-      p99: durations[Math.floor(durations.length * 0.99)] || 0,
-    };
+    return percentileSnapshot(durations);
   }
 
   /**
@@ -224,21 +272,21 @@ export class MetricsCollector {
     lines.push('# HELP mcp_backend_calls_total Total calls per backend');
     lines.push('# TYPE mcp_backend_calls_total counter');
     for (const [backend, metrics] of this.backendMetrics) {
-      lines.push(`mcp_backend_calls_total{backend="${backend}"} ${metrics.totalCalls}`);
+      lines.push(`mcp_backend_calls_total{backend="${escapeLabelValue(backend)}"} ${metrics.totalCalls}`);
     }
 
     lines.push('');
     lines.push('# HELP mcp_backend_errors_total Errors per backend');
     lines.push('# TYPE mcp_backend_errors_total counter');
     for (const [backend, metrics] of this.backendMetrics) {
-      lines.push(`mcp_backend_errors_total{backend="${backend}"} ${metrics.failedCalls}`);
+      lines.push(`mcp_backend_errors_total{backend="${escapeLabelValue(backend)}"} ${metrics.failedCalls}`);
     }
 
     lines.push('');
     lines.push('# HELP mcp_backend_latency_avg_ms Average latency per backend in ms');
     lines.push('# TYPE mcp_backend_latency_avg_ms gauge');
     for (const [backend, metrics] of this.backendMetrics) {
-      lines.push(`mcp_backend_latency_avg_ms{backend="${backend}"} ${metrics.avgDuration.toFixed(2)}`);
+      lines.push(`mcp_backend_latency_avg_ms{backend="${escapeLabelValue(backend)}"} ${metrics.avgDuration.toFixed(2)}`);
     }
 
     // Latency percentiles
@@ -256,9 +304,13 @@ export class MetricsCollector {
     lines.push('');
     lines.push('# HELP mcp_backend_connected Backend connection status (1=connected, 0=disconnected)');
     lines.push('# TYPE mcp_backend_connected gauge');
-    for (const [backend, info] of Object.entries(status)) {
+    const statusEntries = Object.entries(status).slice(0, this.config.maxBackendLabels);
+    for (const [backend, info] of statusEntries) {
       const connected = info.status === 'connected' ? 1 : 0;
-      lines.push(`mcp_backend_connected{backend="${backend}"} ${connected}`);
+      lines.push(`mcp_backend_connected{backend="${escapeLabelValue(backend)}"} ${connected}`);
+    }
+    if (Object.keys(status).length > statusEntries.length) {
+      lines.push(`mcp_backend_connected_overflow_total ${Object.keys(status).length - statusEntries.length}`);
     }
 
     // Tool counts
@@ -304,14 +356,47 @@ export class MetricsCollector {
    * Reset all metrics
    */
   reset(): void {
-    this.toolCalls = [];
     this.backendMetrics.clear();
     this.requestCount = 0;
     this.errorCount = 0;
     this.authFailureCount = 0;
     this.rateLimitExceededCount = 0;
     this.startTime = Date.now();
+    this.toolCalls.clear();
+    this.backendLatency.clear();
   }
+
+  getRetainedToolCallCount(): number {
+    return this.toolCalls.size;
+  }
+
+  private boundBackendLabel(backend: string): string {
+    if (this.backendMetrics.has(backend)) {
+      return backend;
+    }
+    if (this.backendMetrics.size < this.config.maxBackendLabels) {
+      return backend;
+    }
+    return OTHER_BACKEND_LABEL;
+  }
+}
+
+function percentileSnapshot(values: number[]): { p50: number; p90: number; p95: number; p99: number } {
+  if (values.length === 0) {
+    return { p50: 0, p90: 0, p95: 0, p99: 0 };
+  }
+
+  const sorted = [...values].sort((a, b) => a - b);
+  return {
+    p50: sorted[Math.min(Math.floor(sorted.length * 0.5), sorted.length - 1)] ?? 0,
+    p90: sorted[Math.min(Math.floor(sorted.length * 0.9), sorted.length - 1)] ?? 0,
+    p95: sorted[Math.min(Math.floor(sorted.length * 0.95), sorted.length - 1)] ?? 0,
+    p99: sorted[Math.min(Math.floor(sorted.length * 0.99), sorted.length - 1)] ?? 0,
+  };
+}
+
+function escapeLabelValue(value: string): string {
+  return value.replace(/\\/g, '\\\\').replace(/"/g, '\\"').replace(/\n/g, '\\n');
 }
 
 /**
