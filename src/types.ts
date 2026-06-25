@@ -48,11 +48,20 @@ export const ServersConfigSchema = z.object({
 });
 
 // Gateway configuration
+export const DeploymentProfileSchema = z.enum([
+  'local-single-user',
+  'shared-local',
+  'remote-private',
+  'remote-public',
+]);
+
 export const GatewayConfigSchema = z.object({
   port: z.number().default(3000),
   host: z.string().default('0.0.0.0'),
   name: z.string().default('mcp-gateway'),
   logLevel: z.enum(['debug', 'info', 'warn', 'error']).default('info'),
+  deploymentProfile: DeploymentProfileSchema.default('local-single-user'),
+  trustedProxy: z.boolean().default(false),
   auth: z.object({
     mode: z.enum(['none', 'api-key', 'oauth']).default('none'),
     apiKeys: z.array(z.string()).optional(),
@@ -78,9 +87,28 @@ export type SseTransport = z.infer<typeof SseTransportSchema>;
 export type Transport = z.infer<typeof TransportSchema>;
 export type ServerConfig = z.infer<typeof ServerConfigSchema>;
 export type ServersConfig = z.infer<typeof ServersConfigSchema>;
+export type DeploymentProfile = z.infer<typeof DeploymentProfileSchema>;
 export type GatewayConfig = z.infer<typeof GatewayConfigSchema>;
 
 // MCP Protocol Types
+
+/** Structured agent-facing error metadata (optional on tool/JSON-RPC errors) */
+export type AgentErrorCategory =
+  | 'validation'
+  | 'not_found'
+  | 'policy'
+  | 'backend'
+  | 'transport'
+  | 'internal';
+
+export interface AgentStructuredErrorContent {
+  code: string;
+  retryable: boolean;
+  category: AgentErrorCategory;
+  suggestedTool?: string;
+  suggestedArgs?: Record<string, unknown>;
+}
+
 export interface MCPTool {
   name: string;
   description?: string;

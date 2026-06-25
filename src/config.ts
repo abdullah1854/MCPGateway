@@ -13,6 +13,7 @@ import {
   ServerConfig,
 } from './types.js';
 import { logger } from './logger.js';
+import { parseDeploymentProfile, validateProfileCompliance } from './deployment-profile.js';
 
 /**
  * Gateway Settings - persisted gateway configuration
@@ -111,11 +112,16 @@ export function loadGatewayConfig(): GatewayConfig {
     corsOrigins = [rawCorsOrigins.trim()];
   }
 
+  const deploymentProfile = parseDeploymentProfile(process.env.DEPLOYMENT_PROFILE);
+  const trustedProxy = process.env.TRUST_PROXY === '1';
+
   const config = {
     port,
     host,
     name,
     logLevel,
+    deploymentProfile,
+    trustedProxy,
     auth: {
       mode: process.env.AUTH_MODE ?? 'none',
       apiKeys: process.env.API_KEYS?.split(',').map(k => k.trim()).filter(Boolean),
@@ -134,7 +140,9 @@ export function loadGatewayConfig(): GatewayConfig {
     },
   };
 
-  return GatewayConfigSchema.parse(config);
+  const parsed = GatewayConfigSchema.parse(config);
+  validateProfileCompliance(parsed);
+  return parsed;
 }
 
 /**

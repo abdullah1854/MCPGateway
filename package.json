@@ -20,7 +20,8 @@
     "restart": "launchctl stop com.mcp-gateway && launchctl start com.mcp-gateway",
     "lint": "eslint src/",
     "typecheck": "tsc --noEmit",
-    "test": "tsx src/code-execution/executor.sandbox.test.ts"
+    "test": "node scripts/run-tests.mjs",
+    "test:sandbox": "tsx src/code-execution/executor.sandbox.test.ts"
   },
   "keywords": [
     "mcp",

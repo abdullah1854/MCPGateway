@@ -16,6 +16,70 @@ import { logger } from '../logger.js';
 
 export type BackendStatus = 'disconnected' | 'connecting' | 'connected' | 'error';
 
+/** Agent-facing backend context (no secrets). */
+export interface BackendAgentContext {
+  serverId: string;
+  serverName: string;
+  toolPrefix: string | null;
+  transport: 'stdio' | 'http' | 'sse';
+  endpoint: string | null;
+  healthCheckPath: '/health/deps';
+}
+
+const SENSITIVE_QUERY_KEYS = ['token', 'key', 'secret', 'password', 'api_key', 'apikey', 'auth'];
+
+/** Strip credentials and sensitive query params from URLs for agent-visible messages. */
+export function sanitizeTransportUrl(raw: string): string {
+  try {
+    const url = new URL(raw);
+    if (url.username) {
+      url.username = '[REDACTED]';
+    }
+    if (url.password) {
+      url.password = '[REDACTED]';
+    }
+    for (const key of [...url.searchParams.keys()]) {
+      const lower = key.toLowerCase();
+      if (SENSITIVE_QUERY_KEYS.some((s) => lower.includes(s))) {
+        url.searchParams.set(key, '[REDACTED]');
+      }
+    }
+    return url.toString();
+  } catch {
+    return '[invalid-url]';
+  }
+}
+
+export function buildBackendAgentContext(config: ServerConfig): BackendAgentContext {
+  const transport = config.transport;
+  let endpoint: string | null = null;
+
+  switch (transport.type) {
+    case 'stdio': {
+      const argCount = transport.args?.length ?? 0;
+      endpoint = `${transport.command}${argCount > 0 ? ` (${argCount} args)` : ''}`;
+      break;
+    }
+    case 'http':
+    case 'sse':
+      endpoint = sanitizeTransportUrl(transport.url);
+      break;
+    default: {
+      const _exhaustive: never = transport;
+      endpoint = String((_exhaustive as { type: string }).type);
+    }
+  }
+
+  return {
+    serverId: config.id,
+    serverName: config.name,
+    toolPrefix: config.toolPrefix ?? null,
+    transport: transport.type,
+    endpoint,
+    healthCheckPath: '/health/deps',
+  };
+}
+
 export interface BackendEvents {
   connected: [];
   disconnected: [];
