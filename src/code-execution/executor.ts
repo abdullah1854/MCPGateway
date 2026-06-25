@@ -19,7 +19,20 @@ import { BackendManager } from '../backend/index.js';
 import { MCPResponse } from '../types.js';
 import { logger } from '../logger.js';
 import { PIITokenizer, getPIITokenizerForSession } from './pii-tokenizer.js';
-import * as vm from 'vm';
+import {
+  agentError,
+  sanitizeErrorMessage,
+  toolAllowlistDeniedMessage,
+} from '../errors/agent-errors.js';
+import { DeploymentProfile, parseDeploymentProfile } from '../deployment-profile.js';
+import {
+  IsolationCapability,
+  SandboxExecutorFactory,
+  decideIsolation,
+  isProtectedProfile,
+  probeIsolationCapability,
+} from './sandbox/isolation.js';
+import { defaultSandboxExecutorFactory } from './sandbox/factory.js';
 
 /**
  * Deep freeze an object and all nested objects to prevent prototype access
@@ -76,6 +89,14 @@ function createSafeWrapper<T>(fn: T): T {
   return wrapper as T;
 }
 
+function safeParseProfile(raw?: string): DeploymentProfile {
+  try {
+    return parseDeploymentProfile(raw);
+  } catch {
+    return 'local-single-user';
+  }
+}
+
 export interface ExecutionOptions {
   /** Maximum execution time in milliseconds */
   timeout?: number;
@@ -91,18 +112,197 @@ export interface ExecutionOptions {
   sessionId?: string;
 }
 
+export type SandboxErrorKind =
+  | 'syntax'
+  | 'timeout'
+  | 'tool_not_found'
+  | 'reference'
+  | 'runtime'
+  | 'security';
+
 export interface ExecutionResult {
   success: boolean;
   output: string[];
   error?: string;
+  /** Classified error category for agent-friendly handling */
+  errorKind?: SandboxErrorKind;
+  /** Actionable tips — present on both success and failure */
+  hints?: string[];
   executionTime: number;
   returnValue?: unknown;
+}
+
+const SANDBOX_EXAMPLES = {
+  basicCall: `const r = await callTool('gateway_list_tool_names', { limit: 5 });
+console.log(r.success ? r.data : r.error);`,
+  filteredCall: `const r = await callTool('gateway_call_tool_filtered', {
+  toolName: 'your_backend_tool',
+  args: {},
+  filter: { maxRows: 10, format: 'summary' },
+});
+console.log(r);`,
+  batch: `const [a, b] = await Promise.all([
+  callTool('tool_one', {}),
+  callTool('tool_two', {}),
+]);
+console.log({ a: a.data, b: b.data });`,
+} as const;
+
+function classifySandboxError(message: string, error: unknown): SandboxErrorKind {
+  const lower = message.toLowerCase();
+
+  if (
+    lower.includes('timed out') ||
+    lower.includes('timeout') ||
+    (error instanceof Error && (error as NodeJS.ErrnoException).code === 'ERR_SCRIPT_EXECUTION_TIMEOUT')
+  ) {
+    return 'timeout';
+  }
+
+  if (
+    error instanceof SyntaxError ||
+    lower.includes('syntaxerror') ||
+    lower.includes('unexpected token') ||
+    lower.includes('unexpected identifier') ||
+    lower.includes('invalid or unexpected token')
+  ) {
+    return 'syntax';
+  }
+
+  if (lower.includes('access denied') || lower.includes('code generation')) {
+    return 'security';
+  }
+
+  const refMatch = message.match(/(?:ReferenceError:\s*)?([A-Za-z_][A-Za-z0-9_]*) is not defined$/);
+  if (refMatch) {
+    const name = refMatch[1];
+    if (name.includes('_') || name.endsWith('Tool') || /^[a-z]+_[a-z0-9_]+$/i.test(name)) {
+      return 'tool_not_found';
+    }
+    return 'reference';
+  }
+
+  if (lower.includes('tool not found') || lower.includes('not registered with any connected backend') || lower.includes('tool not allowed')) {
+    return 'tool_not_found';
+  }
+
+  return 'runtime';
+}
+
+function formatSandboxError(
+  kind: SandboxErrorKind,
+  rawMessage: string,
+  timeoutMs: number
+): { error: string; hints: string[] } {
+  const hints: string[] = [];
+
+  switch (kind) {
+    case 'syntax':
+      hints.push('Code runs inside an async IIFE — use await at top level; check matching braces/parentheses.');
+      hints.push(`Example:\n${SANDBOX_EXAMPLES.basicCall}`);
+      return {
+        error: `[SYNTAX] ${rawMessage}\nFix the JavaScript/TypeScript syntax above, then retry.`,
+        hints,
+      };
+
+    case 'timeout':
+      hints.push(`Limit is ${timeoutMs}ms. Remove infinite loops; avoid unbounded awaits on slow tools.`);
+      hints.push('Use gateway_call_tool_filtered with filter.maxRows for large results instead of loading everything in sandbox.');
+      hints.push(`Example:\n${SANDBOX_EXAMPLES.filteredCall}`);
+      return {
+        error: agentError({
+          what: `Code execution timed out after ${timeoutMs}ms.`,
+          cause: 'The script ran too long or awaited a slow tool call.',
+          action: 'Reduce batch size, add filters/maxRows on tool calls, or increase the timeout option.',
+        }),
+        hints,
+      };
+
+    case 'tool_not_found': {
+      const nameMatch = rawMessage.match(/Tool "([^"]+)"|Tool not found: ([^\s.]+)/i);
+      const toolName = nameMatch?.[1] ?? nameMatch?.[2];
+      hints.push('Discover exact names with gateway_search_tools or gateway_list_tool_names first.');
+      hints.push('In sandbox, call await callTool(\'exact_tool_name\', args) — hyphens become underscores in auto-generated helpers only when present.');
+      hints.push(`Example:\n${SANDBOX_EXAMPLES.basicCall.replace('gateway_list_tool_names', toolName ?? 'exact_tool_name')}`);
+      return {
+        error: toolName
+          ? agentError({
+              what: `Tool "${toolName}" is not available in this sandbox.`,
+              cause: 'The tool name may be misspelled, disabled, or its backend is offline.',
+              action: 'Call gateway_search_tools or gateway_list_tool_names to find the correct name, then retry.',
+            })
+          : sanitizeErrorMessage(rawMessage),
+        hints,
+      };
+    }
+
+    case 'reference':
+      hints.push('Only sandbox globals, injected context, and registered tool helpers exist.');
+      hints.push(`Example:\n${SANDBOX_EXAMPLES.basicCall}`);
+      return {
+        error: `[REFERENCE] ${rawMessage}`,
+        hints,
+      };
+
+    case 'security':
+      hints.push('eval, Function, require, process, and timers are blocked in the sandbox.');
+      hints.push('Use callTool() for MCP tools and console.log() for output.');
+      return {
+        error: agentError({
+          what: 'Code execution blocked a sandbox escape attempt.',
+          cause: sanitizeErrorMessage(rawMessage),
+          action: 'Use only allowed sandbox APIs and gateway tool functions via callTool().',
+        }),
+        hints,
+      };
+
+    default:
+      hints.push('Check console output captured before the failure; use console.log for debugging.');
+      hints.push(`Example:\n${SANDBOX_EXAMPLES.basicCall}`);
+      return {
+        error: `[RUNTIME] ${rawMessage}`,
+        hints,
+      };
+  }
+}
+
+function buildSuccessHints(output: string[], returnValue: unknown): string[] {
+  const hints = [
+    'output[] = console.log lines sent back to you; returnValue = async script result (often undefined if you only log).',
+    'Log summaries for large objects: console.log(JSON.stringify({ count: rows.length, sample: rows.slice(0, 3) })).',
+  ];
+
+  if (output.length === 0 && (returnValue === undefined || returnValue === null)) {
+    hints.push('No output captured — add console.log(...) to return data from gateway_execute_code.');
+    hints.push(`Example:\n${SANDBOX_EXAMPLES.basicCall}`);
+  }
+
+  if (output.some(line => line.length > 5000)) {
+    hints.push('Large console output detected — prefer gateway_call_tool_filtered with filter: { maxRows, format: "summary" }.');
+  }
+
+  hints.push(`Batch parallel calls:\n${SANDBOX_EXAMPLES.batch}`);
+
+  return hints;
 }
 
 interface ToolCallResult {
   success: boolean;
   data?: unknown;
   error?: string;
+}
+
+export interface CodeExecutorOptions {
+  /** Deployment profile governing isolation policy. Defaults to DEPLOYMENT_PROFILE env. */
+  deploymentProfile?: DeploymentProfile;
+  /** Whether SANDBOX_ISOLATE=1 was requested. Defaults to the env flag. */
+  isolateRequested?: boolean;
+  /** Isolate memory limit in MB. Defaults to SANDBOX_MEMORY_LIMIT_MB or 128. */
+  memoryLimitMb?: number;
+  /** Executor factory (injectable for tests/spies). */
+  executorFactory?: SandboxExecutorFactory;
+  /** Isolation capability probe (injectable for tests). */
+  isolationProbe?: (opts?: { force?: boolean }) => Promise<IsolationCapability>;
 }
 
 /**
@@ -117,8 +317,23 @@ export class CodeExecutor {
   private allowedToolNames: Set<string>;
   private allowedToolPrefixes: string[];
 
-  constructor(backendManager: BackendManager) {
+  private deploymentProfile: DeploymentProfile;
+  private isolateRequested: boolean;
+  private memoryLimitMb: number;
+  private executorFactory: SandboxExecutorFactory;
+  private isolationProbe: (opts?: { force?: boolean }) => Promise<IsolationCapability>;
+
+  constructor(backendManager: BackendManager, options: CodeExecutorOptions = {}) {
     this.backendManager = backendManager;
+
+    this.deploymentProfile =
+      options.deploymentProfile ?? safeParseProfile(process.env.DEPLOYMENT_PROFILE);
+    this.isolateRequested = options.isolateRequested ?? process.env.SANDBOX_ISOLATE === '1';
+    this.memoryLimitMb =
+      options.memoryLimitMb ??
+      (Number.parseInt(process.env.SANDBOX_MEMORY_LIMIT_MB ?? '', 10) || 128);
+    this.executorFactory = options.executorFactory ?? defaultSandboxExecutorFactory;
+    this.isolationProbe = options.isolationProbe ?? probeIsolationCapability;
 
     const requireAllowlist = process.env.CODE_EXECUTION_REQUIRE_ALLOWLIST === '1';
     const allowedTools = (process.env.CODE_EXECUTION_ALLOWED_TOOLS ?? '')
@@ -246,14 +461,25 @@ export class CodeExecutor {
       fromEntries: createSafeWrapper((entries: Iterable<readonly [PropertyKey, unknown]>) => Object.fromEntries(entries)),
     });
 
-    // Safe String - static methods only
-    const safeString = deepFreeze({
-      fromCharCode: createSafeWrapper((...codes: number[]) => String.fromCharCode(...codes)),
-      fromCodePoint: createSafeWrapper((...codePoints: number[]) => String.fromCodePoint(...codePoints)),
+    // Safe String - callable as String(value) for type conversion, plus static methods
+    const safeStringFn = function (...args: unknown[]) {
+      return String(...(args as [unknown]));
+    };
+    Object.defineProperty(safeStringFn, 'constructor', {
+      value: undefined, writable: false, configurable: false, enumerable: false,
     });
+    (safeStringFn as unknown as Record<string, unknown>).fromCharCode = createSafeWrapper((...codes: number[]) => String.fromCharCode(...codes));
+    (safeStringFn as unknown as Record<string, unknown>).fromCodePoint = createSafeWrapper((...codePoints: number[]) => String.fromCodePoint(...codePoints));
+    const safeString = Object.freeze(safeStringFn);
 
-    // Safe Number - static methods and constants only
-    const safeNumber = deepFreeze({
+    // Safe Number - callable as Number(value) for type conversion, plus static methods and constants
+    const safeNumberFn = function (...args: unknown[]) {
+      return Number(...(args as [unknown]));
+    };
+    Object.defineProperty(safeNumberFn, 'constructor', {
+      value: undefined, writable: false, configurable: false, enumerable: false,
+    });
+    const numberStatics: Record<string, unknown> = {
       isNaN: createSafeWrapper((value: unknown) => Number.isNaN(value)),
       isFinite: createSafeWrapper((value: unknown) => Number.isFinite(value)),
       isInteger: createSafeWrapper((value: unknown) => Number.isInteger(value)),
@@ -267,7 +493,11 @@ export class CodeExecutor {
       POSITIVE_INFINITY: Number.POSITIVE_INFINITY,
       NEGATIVE_INFINITY: Number.NEGATIVE_INFINITY,
       NaN: Number.NaN,
-    });
+    };
+    for (const [k, v] of Object.entries(numberStatics)) {
+      (safeNumberFn as unknown as Record<string, unknown>)[k] = v;
+    }
+    const safeNumber = Object.freeze(safeNumberFn);
 
     // Safe Date - allows `new Date()` while preventing constructor escapes
     // Returns a safe wrapper object with common date methods wrapped via createSafeWrapper
@@ -361,12 +591,13 @@ export class CodeExecutor {
     }
     deepFreeze(safeConsole);
 
-    // Sanitize user context - remove any functions that could be exploited
+    // Sanitize user context - neutralize anything that could leak host capability.
+    // Host functions must NEVER execute inside the sandbox (a host closure would run
+    // with host scope and could return host globals), so they are dropped entirely.
     const safeContext: Record<string, unknown> = {};
     for (const [key, value] of Object.entries(context)) {
       if (typeof value === 'function') {
-        // Wrap functions to prevent constructor access
-        safeContext[key] = createSafeWrapper(value as (...args: unknown[]) => unknown);
+        safeContext[key] = undefined;
       } else if (typeof value === 'object' && value !== null) {
         // Deep freeze and sanitize objects via JSON round-trip
         try {
@@ -474,13 +705,57 @@ export class CodeExecutor {
     const output: string[] = [];
     let totalOutputSize = 0;
 
+    // Once execution settles (success, error, or timeout) no further side effects
+    // may be observed. This neutralizes delayed console output, runaway
+    // timer/microtask chains, and post-timeout tool calls in the vm path.
+    let finished = false;
+
+    // Resolve the isolation policy BEFORE building or running any sandbox. For
+    // protected profiles (and SANDBOX_ISOLATE=1) without available isolation we
+    // fail closed here and never construct or invoke the vm executor.
+    const strongIsolationRequired =
+      isProtectedProfile(this.deploymentProfile) || this.isolateRequested;
+    const capability: IsolationCapability = strongIsolationRequired
+      ? await this.isolationProbe()
+      : { available: false, nodeMajor: 0 };
+
+    const decision = decideIsolation({
+      profile: this.deploymentProfile,
+      isolateRequested: this.isolateRequested,
+      capability,
+    });
+
+    if (!decision.allowed) {
+      logger.error('Code execution blocked: strong isolation unavailable', {
+        profile: this.deploymentProfile,
+        isolateRequested: this.isolateRequested,
+        reason: decision.reason,
+      });
+      return {
+        success: false,
+        output: [],
+        error: agentError({
+          what: 'Code execution is disabled because strong isolation is unavailable.',
+          cause: `${decision.reason}; ${decision.detail}.`,
+          action:
+            'Run with DEPLOYMENT_PROFILE=local-single-user for trusted local use, or install a supported isolated-vm runtime for protected profiles.',
+        }),
+        errorKind: 'security',
+        hints: [
+          'Protected deployment profiles never fall back to the Node vm sandbox.',
+          'Strong isolation (isolated-vm) must be available and compatible to run code under this profile.',
+        ],
+        executionTime: Date.now() - startTime,
+      };
+    }
+
     // Create tool call functions
-    const toolFunctions = this.createToolFunctions(tokenizer);
+    const toolFunctions = this.createToolFunctions(tokenizer, () => finished);
 
     // Create console capture
     const consoleCapture = {
       log: (...args: unknown[]) => {
-        if (!captureConsole) return;
+        if (!captureConsole || finished) return;
         const line = args
           .map(arg => {
             if (typeof arg === 'object' && arg !== null) {
@@ -514,48 +789,26 @@ export class CodeExecutor {
       },
     };
 
-    // Build the hardened sandbox context
-    const sandbox = this.createHardenedSandbox(consoleCapture, toolFunctions, context);
-
-    // Create VM context with hardened sandbox
-    const vmContext = vm.createContext(sandbox, {
-      codeGeneration: {
-        strings: false, // Disable eval() and new Function()
-        wasm: false,    // Disable WebAssembly compilation
-      },
-    });
-
     const timeoutMs = Number.isFinite(timeout) ? Math.max(timeout, 1) : this.defaultTimeout;
-    let timeoutId: NodeJS.Timeout | null = null;
-    const timeoutPromise = new Promise<never>((_, reject) => {
-      timeoutId = setTimeout(() => {
-        reject(new Error(`Execution timed out after ${timeoutMs}ms`));
-      }, timeoutMs);
-    });
+
+    const executor =
+      decision.mode === 'isolated'
+        ? this.executorFactory.createIsolatedExecutor(capability, this.memoryLimitMb)
+        : this.executorFactory.createVmExecutor();
 
     try {
-      // Wrap code in async function to support await
-      // Also add a preamble that blocks common escape attempts
-      const wrappedCode = `
-        'use strict';
-        (async () => {
-          // Block constructor access attempts
-          const _blocked = () => { throw new Error('Access denied'); };
-          ${code}
-        })()
-      `;
-
-      // Compile and run the script
-      const script = new vm.Script(wrappedCode, {
-        filename: 'user-code.js',
+      const returnValue = await executor.execute({
+        code,
+        timeoutMs,
+        memoryLimitMb: this.memoryLimitMb,
+        buildVmSandbox: () =>
+          this.createHardenedSandbox(consoleCapture, toolFunctions, context),
+        consoleCapture,
+        toolFunctions,
+        context,
       });
 
-      const runPromise = script.runInContext(vmContext, {
-        timeout: timeoutMs,
-        breakOnSigint: true,
-      });
-      // Apply a wall-clock timeout so async awaits can't hang indefinitely.
-      const returnValue = await Promise.race([runPromise, timeoutPromise]);
+      finished = true;
 
       const sanitizedReturnValue = this.sanitizeReturnValue(returnValue);
       const tokenizedReturnValue = tokenizer
@@ -565,32 +818,42 @@ export class CodeExecutor {
       return {
         success: true,
         output,
+        hints: buildSuccessHints(output, tokenizedReturnValue),
         executionTime: Date.now() - startTime,
         returnValue: tokenizedReturnValue,
       };
     } catch (error) {
+      finished = true;
       const errorMessage = error instanceof Error ? error.message : String(error);
-      logger.error('Code execution error', { error: errorMessage });
+      const errorKind = classifySandboxError(errorMessage, error);
+      const formatted = formatSandboxError(errorKind, errorMessage, timeoutMs);
+      logger.error('Code execution error', { error: errorMessage, errorKind });
 
       return {
         success: false,
         output,
-        error: errorMessage,
+        error: formatted.error,
+        errorKind,
+        hints: formatted.hints,
         executionTime: Date.now() - startTime,
       };
-    } finally {
-      if (timeoutId) {
-        clearTimeout(timeoutId);
-      }
     }
   }
 
   /**
    * Create tool call functions for the sandbox
    */
-  private createToolFunctions(tokenizer: PIITokenizer | null): Record<string, (...args: unknown[]) => Promise<ToolCallResult>> {
+  private createToolFunctions(
+    tokenizer: PIITokenizer | null,
+    isFinished: () => boolean = () => false,
+  ): Record<string, (...args: unknown[]) => Promise<ToolCallResult>> {
     const functions: Record<string, (...args: unknown[]) => Promise<ToolCallResult>> = {};
     const backends = this.backendManager.getBackends();
+
+    const finishedResult = (): ToolCallResult => ({
+      success: false,
+      error: 'Code execution already finished; tool calls after completion are blocked.',
+    });
 
     for (const [, backend] of backends) {
       if (backend.status !== 'connected') continue;
@@ -600,6 +863,7 @@ export class CodeExecutor {
         const safeName = this.toSafeIdentifier(tool.name);
 
         functions[safeName] = async (args: unknown = {}) => {
+          if (isFinished()) return finishedResult();
           try {
             const response: MCPResponse = await this.backendManager.callTool(
               tool.name,
@@ -607,9 +871,13 @@ export class CodeExecutor {
             );
 
             if (response.error) {
+              const msg = response.error.message;
+              const isNotFound = /tool not found|not registered with any connected backend/i.test(msg);
               return {
                 success: false,
-                error: response.error.message,
+                error: isNotFound
+                  ? `${msg} Use gateway_search_tools to find the exact name.`
+                  : msg,
               };
             }
 
@@ -629,12 +897,20 @@ export class CodeExecutor {
 
     // Add a generic callTool function
     functions['callTool'] = async (toolName: unknown, args: unknown = {}) => {
+      if (isFinished()) return finishedResult();
       if (typeof toolName !== 'string') {
-        return { success: false, error: 'Tool name must be a string' };
+        return {
+          success: false,
+          error: agentError({
+            what: 'callTool requires a string tool name.',
+            cause: 'The first argument was not a string.',
+            action: 'Pass a valid tool name string; use gateway_search_tools to discover names.',
+          }),
+        };
       }
 
       if (!this.isProgrammaticToolAllowed(toolName)) {
-        return { success: false, error: `Tool not allowed for programmatic calls: ${toolName}` };
+        return { success: false, error: toolAllowlistDeniedMessage(toolName) };
       }
 
       try {
@@ -644,9 +920,13 @@ export class CodeExecutor {
         );
 
         if (response.error) {
+          const msg = response.error.message;
+          const isNotFound = /tool not found|not registered with any connected backend/i.test(msg);
           return {
             success: false,
-            error: response.error.message,
+            error: isNotFound
+              ? `${msg} Use gateway_search_tools to find the exact name.`
+              : msg,
           };
         }
 
