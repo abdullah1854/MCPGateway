@@ -55,6 +55,8 @@ export const DeploymentProfileSchema = z.enum([
   'remote-public',
 ]);
 
+export const StoreBackendSchema = z.enum(['memory', 'redis']);
+
 export const GatewayConfigSchema = z.object({
   port: z.number().default(3000),
   host: z.string().default('0.0.0.0'),
@@ -78,6 +80,11 @@ export const GatewayConfigSchema = z.object({
     windowMs: z.number().default(60000),
     maxRequests: z.number().default(100),
   }).default({ windowMs: 60000, maxRequests: 100 }),
+  store: z.object({
+    backend: StoreBackendSchema.default('memory'),
+    redisUrl: z.string().optional(),
+    namespace: z.string().min(1).default('mcp-gateway'),
+  }).default({ backend: 'memory', namespace: 'mcp-gateway' }),
 });
 
 // Export types
@@ -88,6 +95,7 @@ export type Transport = z.infer<typeof TransportSchema>;
 export type ServerConfig = z.infer<typeof ServerConfigSchema>;
 export type ServersConfig = z.infer<typeof ServersConfigSchema>;
 export type DeploymentProfile = z.infer<typeof DeploymentProfileSchema>;
+export type StoreBackend = z.infer<typeof StoreBackendSchema>;
 export type GatewayConfig = z.infer<typeof GatewayConfigSchema>;
 
 // MCP Protocol Types
@@ -223,4 +231,3 @@ export const MCPErrorCodes = {
   ServerNotInitialized: -32002,
   UnknownError: -32001,
 } as const;
-

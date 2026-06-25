@@ -47,6 +47,9 @@ const PROFILE_ENV_KEYS = [
   'CORS_ORIGINS',
   'TRUST_PROXY',
   'PORT',
+  'STORE_BACKEND',
+  'REDIS_URL',
+  'STORE_NAMESPACE',
 ] as const;
 
 function withEnv<T>(vars: Record<string, string | undefined>, fn: () => T): T {
@@ -89,6 +92,8 @@ function validProtectedEnv(profile: DeploymentProfile): Record<string, string> {
     CODE_EXECUTION_REQUIRE_ALLOWLIST: '1',
     CORS_ORIGINS: 'https://app.example.com',
     PORT: '3010',
+    STORE_BACKEND: profile === 'remote-public' ? 'redis' : 'memory',
+    REDIS_URL: profile === 'remote-public' ? 'redis://127.0.0.1:6379' : '',
   };
 }
 
@@ -214,6 +219,24 @@ async function main(): Promise<void> {
       assert.equal(config.auth.mode, 'api-key');
       assert.notEqual(config.cors.origins, '*');
     }
+  });
+
+  await runTest('VAL-PROFILE-002: remote-public fails closed without Redis stores', () => {
+    assert.throws(
+      () =>
+        withEnv(
+          { ...validProtectedEnv('remote-public'), STORE_BACKEND: 'memory', REDIS_URL: undefined },
+          () => loadGatewayConfig(),
+        ),
+      /requires STORE_BACKEND=redis/,
+    );
+  });
+
+  await runTest('VAL-PROFILE-002: remote-public accepts Redis-backed store config', () => {
+    const config = withEnv(validProtectedEnv('remote-public'), () => loadGatewayConfig());
+    assert.equal(config.deploymentProfile, 'remote-public');
+    assert.equal(config.store.backend, 'redis');
+    assert.equal(config.store.redisUrl, 'redis://127.0.0.1:6379');
   });
 
   await runTest('VAL-PROFILE-002: local-single-user keeps permissive defaults', () => {

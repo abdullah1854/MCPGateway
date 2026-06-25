@@ -14,6 +14,7 @@ import ConfigManager from './config.js';
 import { logger } from './logger.js';
 import { printStartupBanner } from './banner.js';
 import { setupGracefulShutdown } from './services/graceful-shutdown.js';
+import { createGatewayStores } from './middleware/index.js';
 
 async function main(): Promise<void> {
   logger.info('Starting MCP Gateway...');
@@ -30,8 +31,11 @@ async function main(): Promise<void> {
     enabled: serversConfig.servers.filter(s => s.enabled).length,
   });
 
+  const stores = await createGatewayStores(gatewayConfig);
+  logger.info('Store backend initialized', { backend: stores.backend });
+
   // Create and start server
-  const server = new MCPGatewayServer(gatewayConfig);
+  const server = new MCPGatewayServer(gatewayConfig, stores);
 
   // Start the HTTP server immediately (don't wait for backends)
   await server.start();
@@ -77,4 +81,3 @@ main().catch((error) => {
   logger.error('Fatal error', { error: error.message, stack: error.stack });
   process.exit(1);
 });
-

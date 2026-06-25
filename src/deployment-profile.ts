@@ -38,6 +38,7 @@ export interface ProfileSecurityPolicy {
   allowWildcardCors: boolean;
   /** Whether X-Forwarded-For may be used for rate limiting */
   trustProxy: boolean;
+  requireRedisStore: boolean;
 }
 
 export function parseDeploymentProfile(raw?: string): DeploymentProfile {
@@ -60,6 +61,7 @@ export function getProfileSecurityPolicy(profile: DeploymentProfile): ProfileSec
         requireCodeExecAllowlist: false,
         allowWildcardCors: true,
         trustProxy: false,
+        requireRedisStore: false,
       };
     case 'shared-local':
       return {
@@ -68,6 +70,7 @@ export function getProfileSecurityPolicy(profile: DeploymentProfile): ProfileSec
         requireCodeExecAllowlist: true,
         allowWildcardCors: false,
         trustProxy: process.env.TRUST_PROXY === '1',
+        requireRedisStore: false,
       };
     case 'remote-private':
       return {
@@ -76,6 +79,7 @@ export function getProfileSecurityPolicy(profile: DeploymentProfile): ProfileSec
         requireCodeExecAllowlist: true,
         allowWildcardCors: false,
         trustProxy: process.env.TRUST_PROXY === '1',
+        requireRedisStore: false,
       };
     case 'remote-public':
       return {
@@ -84,6 +88,7 @@ export function getProfileSecurityPolicy(profile: DeploymentProfile): ProfileSec
         requireCodeExecAllowlist: true,
         allowWildcardCors: false,
         trustProxy: process.env.TRUST_PROXY === '1',
+        requireRedisStore: true,
       };
   }
 }
@@ -142,6 +147,12 @@ export function validateProfileCompliance(config: GatewayConfig): void {
     );
   }
 
+  if (policy.requireRedisStore && config.store.backend !== 'redis') {
+    throw new Error(
+      `DEPLOYMENT_PROFILE=${policy.profile} requires STORE_BACKEND=redis for shared rate-limit and session state.`,
+    );
+  }
+
   if (policy.profile !== 'local-single-user' && corsIsWildcard) {
     logger.warn(
       'Wildcard CORS with credentials is unsafe; use explicit origins for non-local profiles',
@@ -154,6 +165,7 @@ export function validateProfileCompliance(config: GatewayConfig): void {
     authMode: config.auth.mode,
     corsOrigins: config.cors.origins,
     trustProxy: config.trustedProxy,
+    storeBackend: config.store.backend,
     codeExecAllowlist: hasCodeExecAllowlist(),
   });
 }

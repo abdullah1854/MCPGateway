@@ -5,7 +5,7 @@
 
 import { Request, Response, Router } from 'express';
 import { MCPProtocolHandler } from '../protocol/index.js';
-import { MCPRequest, MCPMessage } from '../types.js';
+import { GatewaySession, MCPRequest, MCPMessage } from '../types.js';
 import { logger } from '../logger.js';
 
 export function createHttpTransport(protocolHandler: MCPProtocolHandler): Router {
@@ -17,7 +17,23 @@ export function createHttpTransport(protocolHandler: MCPProtocolHandler): Router
    */
   router.post('/', async (req: Request, res: Response) => {
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
-    const session = protocolHandler.getOrCreateSession(sessionId);
+    let session: GatewaySession;
+
+    try {
+      session = await protocolHandler.getOrCreateSession(sessionId);
+    } catch (error) {
+      logger.error('Failed to load MCP session', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      res.status(503).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32004,
+          message: 'Session store unavailable',
+        },
+      });
+      return;
+    }
 
     // Set session ID header
     res.setHeader('Mcp-Session-Id', session.id);
@@ -47,13 +63,28 @@ export function createHttpTransport(protocolHandler: MCPProtocolHandler): Router
   /**
    * Handle DELETE requests - close session
    */
-  router.delete('/', (req: Request, res: Response) => {
+  router.delete('/', async (req: Request, res: Response) => {
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
-    
+
     if (sessionId) {
-      const session = protocolHandler.getSession(sessionId);
-      if (session) {
-        logger.info(`Session ${sessionId} closed by client`);
+      try {
+        const session = await protocolHandler.getSession(sessionId);
+        if (session) {
+          await protocolHandler.deleteSession(sessionId);
+          logger.info(`Session ${sessionId} closed by client`);
+        }
+      } catch (error) {
+        logger.error('Failed to close MCP session', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        res.status(503).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32004,
+            message: 'Session store unavailable',
+          },
+        });
+        return;
       }
     }
 
@@ -68,7 +99,7 @@ export function createHttpTransport(protocolHandler: MCPProtocolHandler): Router
  */
 async function handleSingleRequest(
   body: MCPMessage,
-  session: ReturnType<MCPProtocolHandler['getOrCreateSession']>,
+  session: GatewaySession,
   protocolHandler: MCPProtocolHandler,
   _req: Request,
   res: Response
@@ -106,7 +137,7 @@ async function handleSingleRequest(
  */
 async function handleBatchRequest(
   messages: MCPMessage[],
-  session: ReturnType<MCPProtocolHandler['getOrCreateSession']>,
+  session: GatewaySession,
   protocolHandler: MCPProtocolHandler,
   res: Response
 ): Promise<void> {
@@ -132,4 +163,3 @@ async function handleBatchRequest(
 
   res.json(responses);
 }
-

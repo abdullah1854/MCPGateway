@@ -114,6 +114,7 @@ export function loadGatewayConfig(): GatewayConfig {
 
   const deploymentProfile = parseDeploymentProfile(process.env.DEPLOYMENT_PROFILE);
   const trustedProxy = process.env.TRUST_PROXY === '1';
+  const storeBackend = process.env.STORE_BACKEND ?? 'memory';
 
   const config = {
     port,
@@ -137,6 +138,11 @@ export function loadGatewayConfig(): GatewayConfig {
     rateLimit: {
       windowMs: parseInt(process.env.RATE_LIMIT_WINDOW_MS ?? '60000', 10),
       maxRequests: parseInt(process.env.RATE_LIMIT_MAX_REQUESTS ?? '1000', 10),
+    },
+    store: {
+      backend: storeBackend,
+      redisUrl: process.env.REDIS_URL,
+      namespace: process.env.STORE_NAMESPACE ?? 'mcp-gateway',
     },
   };
 
@@ -529,4 +535,3 @@ class ConfigManager {
 }
 
 export default ConfigManager;
-

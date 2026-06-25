@@ -5,7 +5,7 @@
 
 import { Request, Response, Router } from 'express';
 import { MCPProtocolHandler } from '../protocol/index.js';
-import { MCPRequest, MCPMessage } from '../types.js';
+import { GatewaySession, MCPRequest, MCPMessage } from '../types.js';
 import { logger } from '../logger.js';
 
 interface SSEConnection {
@@ -36,9 +36,25 @@ export function createSseTransport(protocolHandler: MCPProtocolHandler): Router 
   /**
    * GET /sse - Establish SSE connection
    */
-  router.get('/', (req: Request, res: Response) => {
+  router.get('/', async (req: Request, res: Response) => {
     const sessionId = req.query.sessionId as string | undefined;
-    const session = protocolHandler.getOrCreateSession(sessionId);
+    let session: GatewaySession;
+
+    try {
+      session = await protocolHandler.getOrCreateSession(sessionId);
+    } catch (error) {
+      logger.error('Failed to load SSE session', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      res.status(503).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32004,
+          message: 'Session store unavailable',
+        },
+      });
+      return;
+    }
 
     logger.info(`SSE connection established`, { sessionId: session.id });
 
@@ -106,7 +122,23 @@ export function createSseTransport(protocolHandler: MCPProtocolHandler): Router 
       return;
     }
 
-    const session = protocolHandler.getSession(sessionId);
+    let session: GatewaySession | undefined;
+    try {
+      session = await protocolHandler.getSession(sessionId);
+    } catch (error) {
+      logger.error('Failed to load SSE session', {
+        error: error instanceof Error ? error.message : String(error),
+      });
+      res.status(503).json({
+        jsonrpc: '2.0',
+        error: {
+          code: -32004,
+          message: 'Session store unavailable',
+        },
+      });
+      return;
+    }
+
     if (!session) {
       res.status(400).json({
         jsonrpc: '2.0',
@@ -150,15 +182,30 @@ export function createSseTransport(protocolHandler: MCPProtocolHandler): Router 
   /**
    * DELETE /sse - Close SSE connection
    */
-  router.delete('/', (req: Request, res: Response) => {
+  router.delete('/', async (req: Request, res: Response) => {
     const sessionId = req.headers['mcp-session-id'] as string | undefined;
-    
+
     if (sessionId) {
       const connection = connections.get(sessionId);
       if (connection) {
         connection.response.end();
         connections.delete(sessionId);
         logger.info(`SSE connection closed by client`, { sessionId });
+      }
+      try {
+        await protocolHandler.deleteSession(sessionId);
+      } catch (error) {
+        logger.error('Failed to close SSE session', {
+          error: error instanceof Error ? error.message : String(error),
+        });
+        res.status(503).json({
+          jsonrpc: '2.0',
+          error: {
+            code: -32004,
+            message: 'Session store unavailable',
+          },
+        });
+        return;
       }
     }
 
@@ -200,4 +247,3 @@ export function sendToSession(sessionId: string, event: string, data: unknown): 
   }
   return false;
 }
-

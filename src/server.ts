@@ -15,8 +15,10 @@ import { createCodeExecutionRoutes } from './code-execution/index.js';
 import {
   createAuthMiddleware,
   createCorsMiddleware,
+  createInMemoryGatewayStores,
   createRateLimitMiddleware,
 } from './middleware/index.js';
+import type { GatewayStores } from './middleware/index.js';
 import { MetricsCollector, createMetricsRoutes, AuditLogger } from './monitoring/index.js';
 import { HealthTimelineService } from './services/health-timeline.js';
 import { ToolAnalyticsService } from './services/tool-analytics.js';
@@ -34,15 +36,18 @@ export class MCPGatewayServer {
   private auditLogger: AuditLogger;
   private healthTimeline: HealthTimelineService;
   private toolAnalytics: ToolAnalyticsService;
+  private stores: GatewayStores;
 
-  constructor(config: GatewayConfig) {
+  constructor(config: GatewayConfig, stores: GatewayStores = createInMemoryGatewayStores(config.store.namespace)) {
     this.config = config;
+    this.stores = stores;
     this.app = express();
     this.backendManager = new BackendManager();
     this.protocolHandler = new MCPProtocolHandler(
       this.backendManager,
       config.name,
-      '1.0.0'
+      '1.0.0',
+      { sessionStore: stores.sessions },
     );
     this.metricsCollector = new MetricsCollector();
     this.auditLogger = new AuditLogger();
@@ -84,7 +89,7 @@ export class MCPGatewayServer {
     this.app.use(express.json({ limit: '10mb' }));
 
     // Rate limiting
-    this.app.use(createRateLimitMiddleware(this.config));
+    this.app.use(createRateLimitMiddleware(this.config, { store: this.stores.rateLimit }));
 
     // Authentication
     this.app.use(createAuthMiddleware(this.config));
@@ -345,7 +350,11 @@ export class MCPGatewayServer {
 
         // Start session cleanup
         this.sessionCleanupInterval = setInterval(() => {
-          this.protocolHandler.cleanupSessions();
+          this.protocolHandler.cleanupSessions().catch(error => {
+            logger.error('Session cleanup failed', {
+              error: error instanceof Error ? error.message : String(error),
+            });
+          });
         }, 60000);
 
         resolve();
@@ -366,6 +375,8 @@ export class MCPGatewayServer {
 
     // Disconnect all backends
     await this.backendManager.disconnectAll();
+
+    await this.stores.close();
 
     // Close server
     if (this.server) {
@@ -429,4 +440,3 @@ export class MCPGatewayServer {
     return this.server;
   }
 }
-

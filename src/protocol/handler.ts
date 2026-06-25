@@ -15,8 +15,10 @@ import { BackendManager } from '../backend/index.js';
 import { logger } from '../logger.js';
 import { createGatewayTools, GatewayTool } from '../code-execution/gateway-tools/index.js';
 import { getPIITokenizerForSession, clearPIITokenizerForSession } from '../code-execution/pii-tokenizer.js';
+import { createInMemoryGatewayStores, SessionStore } from '../middleware/stores.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
+const DEFAULT_SESSION_TTL_MS = 3600000;
 
 // Allowlist configuration for direct MCP tool calls (non-gateway tools)
 const requireAllowlist = process.env.CODE_EXECUTION_REQUIRE_ALLOWLIST === '1';
@@ -44,8 +46,12 @@ export interface ToolCallMetrics {
   success: boolean;
 }
 
+export interface MCPProtocolHandlerOptions {
+  sessionStore?: SessionStore;
+}
+
 export class MCPProtocolHandler {
-  private sessions = new Map<string, GatewaySession>();
+  private sessionStore: SessionStore;
   private backendManager: BackendManager;
   private gatewayName: string;
   private gatewayVersion: string;
@@ -54,10 +60,16 @@ export class MCPProtocolHandler {
   private gatewayToolNames: Set<string>;
   private onToolCall?: (metrics: ToolCallMetrics) => void;
 
-  constructor(backendManager: BackendManager, gatewayName = 'mcp-gateway', gatewayVersion = '1.0.0') {
+  constructor(
+    backendManager: BackendManager,
+    gatewayName = 'mcp-gateway',
+    gatewayVersion = '1.0.0',
+    options: MCPProtocolHandlerOptions = {},
+  ) {
     this.backendManager = backendManager;
     this.gatewayName = gatewayName;
     this.gatewayVersion = gatewayVersion;
+    this.sessionStore = options.sessionStore ?? createInMemoryGatewayStores().sessions;
 
     // Initialize gateway tools for progressive disclosure
     const { tools, callTool } = createGatewayTools(backendManager, {
@@ -82,13 +94,22 @@ export class MCPProtocolHandler {
   /**
    * Create or get a session
    */
-  getOrCreateSession(sessionId?: string): GatewaySession {
-    if (sessionId && this.sessions.has(sessionId)) {
-      const session = this.sessions.get(sessionId)!;
+  async getOrCreateSession(sessionId?: string): Promise<GatewaySession> {
+    if (sessionId) {
+      const session = await this.sessionStore.get(sessionId);
+      if (!session) {
+        return this.createSession(sessionId);
+      }
+
       session.lastActivityAt = new Date();
+      await this.sessionStore.set(session, DEFAULT_SESSION_TTL_MS);
       return session;
     }
 
+    return this.createSession();
+  }
+
+  private async createSession(sessionId?: string): Promise<GatewaySession> {
     const newSession: GatewaySession = {
       id: sessionId ?? uuidv4(),
       createdAt: new Date(),
@@ -96,36 +117,38 @@ export class MCPProtocolHandler {
       initialized: false,
     };
 
-    this.sessions.set(newSession.id, newSession);
+    await this.sessionStore.set(newSession, DEFAULT_SESSION_TTL_MS);
     return newSession;
   }
 
   /**
    * Get session by ID
    */
-  getSession(sessionId: string): GatewaySession | undefined {
-    return this.sessions.get(sessionId);
+  getSession(sessionId: string): Promise<GatewaySession | undefined> {
+    return this.sessionStore.get(sessionId);
+  }
+
+  deleteSession(sessionId: string): Promise<void> {
+    clearPIITokenizerForSession(sessionId);
+    return this.sessionStore.delete(sessionId);
   }
 
   /**
    * Handle incoming MCP message
    */
   async handleMessage(message: MCPMessage, session: GatewaySession): Promise<MCPResponse | null> {
-    // Update session activity
     session.lastActivityAt = new Date();
 
-    // Check if it's a request (has id) or notification (no id)
-    if (!('id' in message) || message.id === null || message.id === undefined) {
-      // It's a notification, handle it but don't respond
-      await this.handleNotification(message as MCPRequest, session);
-      return null;
-    }
-
-    const request = message as MCPRequest;
-
     try {
+      if (!('id' in message) || message.id === null || message.id === undefined) {
+        await this.handleNotification(message as MCPRequest, session);
+        return null;
+      }
+
+      const request = message as MCPRequest;
       return await this.handleRequest(request, session);
     } catch (error) {
+      const request = message as MCPRequest;
       logger.error('Error handling request', {
         method: request.method,
         error: error instanceof Error ? error.message : String(error),
@@ -139,6 +162,8 @@ export class MCPProtocolHandler {
           message: error instanceof Error ? error.message : 'Internal error',
         },
       };
+    } finally {
+      await this.sessionStore.set(session, DEFAULT_SESSION_TTL_MS);
     }
   }
 
@@ -484,21 +509,15 @@ export class MCPProtocolHandler {
   /**
    * Clean up old sessions
    */
-  cleanupSessions(maxAgeMs = 3600000): void {
-    const now = Date.now();
-    let cleaned = 0;
+  async cleanupSessions(maxAgeMs = DEFAULT_SESSION_TTL_MS): Promise<void> {
+    const cleanedIds = (await this.sessionStore.cleanupExpired?.(maxAgeMs)) ?? [];
 
-    for (const [id, session] of this.sessions) {
-      if (now - session.lastActivityAt.getTime() > maxAgeMs) {
-        this.sessions.delete(id);
-        // Also clean up session-scoped PII tokenizer to prevent memory leak
-        clearPIITokenizerForSession(id);
-        cleaned++;
-      }
+    for (const id of cleanedIds) {
+      clearPIITokenizerForSession(id);
     }
 
-    if (cleaned > 0) {
-      logger.debug(`Cleaned up ${cleaned} stale sessions`);
+    if (cleanedIds.length > 0) {
+      logger.debug(`Cleaned up ${cleanedIds.length} stale sessions`);
     }
   }
 }

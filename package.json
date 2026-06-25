@@ -51,6 +51,7 @@
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.0.0",
     "@playwright/mcp": "^0.0.52",
+    "@redis/client": "^6.0.1",
     "@sentry/node": "^10.32.1",
     "compression": "^1.7.4",
     "cors": "^2.8.5",
