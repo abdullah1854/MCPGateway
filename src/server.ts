@@ -4,7 +4,6 @@
  */
 
 import express, { Express, Request, Response, NextFunction } from 'express';
-import cors from 'cors';
 import helmet from 'helmet';
 import compression from 'compression';
 import { GatewayConfig, ServersConfig } from './types.js';
@@ -13,7 +12,11 @@ import { MCPProtocolHandler } from './protocol/index.js';
 import { createHttpTransport, createSseTransport, broadcastSSEMessage } from './transports/index.js';
 import { createDashboardRoutes } from './dashboard/index.js';
 import { createCodeExecutionRoutes } from './code-execution/index.js';
-import { createAuthMiddleware, createRateLimitMiddleware } from './middleware/index.js';
+import {
+  createAuthMiddleware,
+  createCorsMiddleware,
+  createRateLimitMiddleware,
+} from './middleware/index.js';
 import { MetricsCollector, createMetricsRoutes, AuditLogger } from './monitoring/index.js';
 import { HealthTimelineService } from './services/health-timeline.js';
 import { ToolAnalyticsService } from './services/tool-analytics.js';
@@ -71,15 +74,8 @@ export class MCPGatewayServer {
       crossOriginEmbedderPolicy: false,
     }));
 
-    // CORS
-    const corsOrigins = this.config.cors.origins;
-    this.app.use(cors({
-      origin: corsOrigins === '*' ? '*' : corsOrigins,
-      credentials: true,
-      methods: ['GET', 'POST', 'DELETE', 'OPTIONS'],
-      allowedHeaders: ['Content-Type', 'Authorization', 'Mcp-Session-Id', 'X-Session-Id', 'Accept'],
-      exposedHeaders: ['Mcp-Session-Id'],
-    }));
+    // CORS — profile-aware; wildcard+credentials only on localhost in local-single-user.
+    this.app.use(createCorsMiddleware(this.config));
 
     // Compression
     this.app.use(compression());
