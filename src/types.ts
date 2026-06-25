@@ -161,6 +161,8 @@ export interface MCPServerCapabilities {
   prompts?: {
     listChanged?: boolean;
   };
+  completions?: Record<string, never>;
+  completion?: Record<string, never>;
 }
 
 export interface MCPInitializeResult {

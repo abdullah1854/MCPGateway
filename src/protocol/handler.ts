@@ -19,6 +19,7 @@ import { createInMemoryGatewayStores, SessionStore } from '../middleware/stores.
 import { enforceAuthorization } from '../middleware/authorization.js';
 import { AuditLogger } from '../monitoring/audit.js';
 import { GatewayToolCallContext } from '../code-execution/gateway-tools/types.js';
+import { buildCompletionCapability } from './compat.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
 const DEFAULT_SESSION_TTL_MS = 3600000;
@@ -204,8 +205,8 @@ export class MCPProtocolHandler {
       case 'prompts/get':
         return this.handlePromptsGet(request, session);
 
-      // Note: completion/complete is not supported by the gateway
-      // Clients should check capabilities before calling
+      case 'completion/complete':
+        return this.handleCompletionComplete(request, session);
 
       default:
         return {
@@ -263,6 +264,7 @@ export class MCPProtocolHandler {
     const hasTools = this.backendManager.getEnabledTools().length > 0;
     const hasResources = this.backendManager.getAllResources().length > 0;
     const hasPrompts = this.backendManager.getAllPrompts().length > 0;
+    const hasCompletions = this.backendManager.hasCompletionSupport();
 
     return {
       jsonrpc: '2.0',
@@ -273,12 +275,28 @@ export class MCPProtocolHandler {
           ...(hasTools && { tools: { listChanged: true } }),
           ...(hasResources && { resources: { subscribe: false, listChanged: true } }),
           ...(hasPrompts && { prompts: { listChanged: true } }),
+          ...buildCompletionCapability(hasCompletions),
         },
         serverInfo: {
           name: this.gatewayName,
           version: this.gatewayVersion,
         },
       },
+    };
+  }
+
+  private async handleCompletionComplete(request: MCPRequest, session: GatewaySession): Promise<MCPResponse> {
+    if (!session.initialized) {
+      logger.debug('completion/complete called before initialized notification');
+    }
+
+    const response = await this.backendManager.complete(request.params);
+
+    return {
+      jsonrpc: '2.0',
+      id: request.id,
+      result: response.result,
+      error: response.error,
     };
   }
 

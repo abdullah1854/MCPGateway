@@ -18,6 +18,7 @@ import { HttpBackend } from './http.js';
 import { SSEBackend } from './sse.js';
 import { CircuitBreakerManager, CircuitBreakerStats } from './circuit-breaker.js';
 import { logger } from '../logger.js';
+import { supportsCompletion } from '../protocol/compat.js';
 
 // Event types for BackendManager (used via EventEmitter)
 // backendConnected: [id: string]
@@ -414,6 +415,15 @@ export class BackendManager extends EventEmitter {
     return prompts;
   }
 
+  hasCompletionSupport(): boolean {
+    for (const backend of this.backends.values()) {
+      if (backend.status === 'connected' && supportsCompletion(backend.capabilities)) {
+        return true;
+      }
+    }
+    return false;
+  }
+
   /**
    * Route a tool call to the appropriate backend
    */
@@ -604,6 +614,114 @@ export class BackendManager extends EventEmitter {
     return backend.sendRequest(request);
   }
 
+  async complete(params: unknown): Promise<MCPResponse> {
+    const route = this.getCompletionRoute(params);
+    if ('error' in route) {
+      return route.error;
+    }
+
+    const request: MCPRequest = {
+      jsonrpc: '2.0',
+      id: Date.now(),
+      method: 'completion/complete',
+      params,
+    };
+
+    return route.backend.sendRequest(request);
+  }
+
+  private getCompletionRoute(params: unknown): { backend: Backend } | { error: MCPResponse } {
+    const invalid = (message: string): { error: MCPResponse } => ({
+      error: {
+        jsonrpc: '2.0',
+        id: 0,
+        error: { code: MCPErrorCodes.InvalidParams, message },
+      },
+    });
+    const notFound = (message: string): { error: MCPResponse } => ({
+      error: {
+        jsonrpc: '2.0',
+        id: 0,
+        error: { code: MCPErrorCodes.MethodNotFound, message },
+      },
+    });
+
+    if (typeof params !== 'object' || params === null) {
+      return invalid('Invalid completion params');
+    }
+
+    const { ref, argument } = params as {
+      ref?: { type?: string; name?: string; uri?: string };
+      argument?: { name?: string; value?: string };
+    };
+
+    if (!ref || typeof ref !== 'object') {
+      return invalid('Missing completion reference');
+    }
+    if (!argument || typeof argument.name !== 'string' || typeof argument.value !== 'string') {
+      return invalid('Missing completion argument');
+    }
+    if (ref.type === 'ref/prompt' && !ref.name) {
+      return invalid('Missing prompt completion reference name');
+    }
+    if (ref.type === 'ref/resource' && !ref.uri) {
+      return invalid('Missing resource completion reference URI');
+    }
+    if (ref.type !== 'ref/prompt' && ref.type !== 'ref/resource') {
+      return invalid(`Unsupported completion reference type: ${ref.type ?? 'unknown'}`);
+    }
+    if (!this.hasCompletionSupport()) {
+      return notFound('No completion-capable backend available');
+    }
+
+    const backend = this.findCompletionBackend(ref);
+    if (!backend) {
+      return invalid('Completion reference not found');
+    }
+
+    return { backend };
+  }
+
+  private findCompletionBackend(ref: { type?: string; name?: string; uri?: string }): Backend | undefined {
+    if (ref.type === 'ref/prompt') {
+      if (!ref.name) {
+        return undefined;
+      }
+      const backendId = this.promptToBackend.get(ref.name);
+      return this.getCompletionBackendById(backendId);
+    }
+
+    if (ref.type === 'ref/resource') {
+      if (!ref.uri) {
+        return undefined;
+      }
+      const backendId = this.resourceToBackend.get(ref.uri);
+      return this.getCompletionBackendById(backendId) ?? this.getFirstCompletionBackend();
+    }
+
+    return undefined;
+  }
+
+  private getCompletionBackendById(backendId: string | undefined): Backend | undefined {
+    if (!backendId) {
+      return undefined;
+    }
+    const backend = this.backends.get(backendId);
+    if (backend?.status === 'connected' && supportsCompletion(backend.capabilities)) {
+      return backend;
+    }
+    return undefined;
+  }
+
+  private getFirstCompletionBackend(): Backend | undefined {
+    for (const backend of this.backends.values()) {
+      if (backend.status === 'connected' && supportsCompletion(backend.capabilities)) {
+        return backend;
+      }
+    }
+    return undefined;
+  }
+
   /**
    * Get backend status summary
    */
@@ -735,4 +853,3 @@ export class BackendManager extends EventEmitter {
     return this.toolToBackend.get(toolName);
   }
 }
-
