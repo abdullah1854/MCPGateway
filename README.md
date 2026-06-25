@@ -322,6 +322,24 @@ npm run lint
 npm run build
 ```
 
+#### Hardening closeout notes
+
+The latest hardening closeout adds these guardrails:
+
+- Sandbox host-callable wrappers are pinned to safe call shapes so user code cannot pivot through wrapper constructors.
+- Redis-backed rate limits use atomic TTL-aware updates, and `remote-public` remains fail-closed without reachable Redis.
+- `completion/complete` requests are routed through the owning backend so resource references cannot cross backend boundaries.
+- Redis session cleanup returns expired session IDs so local PII token maps are removed when shared sessions expire.
+- REST skill execution now carries the authenticated identity/scope into the skill runner.
+- REST tool-call caching is explicit opt-in with `cache: true` or `cache: { "enabled": true }`; cache hits do not bypass authorization.
+
+To confirm what is running locally without restarting the gateway:
+
+```bash
+lsof -nP -iTCP:3010 -sTCP:LISTEN
+curl -sS http://127.0.0.1:3010/health/summary
+```
+
 ## Endpoints
 
 ### Core Endpoints
@@ -1803,14 +1821,18 @@ await gateway_execute_skill({
 
 ### Layer 6: Result Caching
 
-Identical queries hit the LRU cache instead of re-executing:
+REST tool-call caching is opt-in so authorization, freshness, and side effects stay explicit. Enable it only for read-only calls that are safe to replay:
 
-```javascript
-// First call: Executes tool, caches result
-await gateway_call_tool_filtered({ toolName: "db_query", args: { query: "SELECT COUNT(*) FROM users" } });
+```bash
+# First call: executes the tool and stores the result
+curl -X POST http://localhost:3010/api/code/tools/db_query/call \
+  -H "Content-Type: application/json" \
+  -d '{"args":{"query":"SELECT COUNT(*) FROM users"},"cache":true}'
 
-// Second call: Returns cached result instantly (0 tool execution tokens)
-await gateway_call_tool_filtered({ toolName: "db_query", args: { query: "SELECT COUNT(*) FROM users" } });
+# Repeated identical call: returns a cache hit after authorization succeeds
+curl -X POST http://localhost:3010/api/code/tools/db_query/call \
+  -H "Content-Type: application/json" \
+  -d '{"args":{"query":"SELECT COUNT(*) FROM users"},"cache":{"enabled":true}}'
 ```
 
 ### Layer 7: PII Tokenization
