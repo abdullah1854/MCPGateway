@@ -231,6 +231,38 @@ async function main(): Promise<void> {
     assert(probeCalls === 0, 'isolation probe must not run for trusted local path');
   });
 
+  await runTest('VAL-SANDBOX-023: local vm host wrappers block constructor escape', async () => {
+    const exec = new CodeExecutor(new FakeBackendManager(), {
+      deploymentProfile: 'local-single-user',
+    });
+    const payloads = [
+      'String.__proto__.constructor("return process")()',
+      'String.prototype?.constructor?.constructor("return process")()',
+      'Number.__proto__.constructor("return process")()',
+      'Number.prototype?.constructor?.constructor("return process")()',
+      'Date.__proto__.constructor("return process")()',
+      'Date.prototype?.constructor?.constructor("return process")()',
+      'Math.max.__proto__.constructor("return process")()',
+      'JSON.parse.__proto__.constructor("return process")()',
+      'console.log.__proto__.constructor("return process")()',
+    ];
+
+    for (const payload of payloads) {
+      const result = await exec.execute(`
+        try {
+          const value = ${payload};
+          console.log(typeof value, value?.versions?.node || 'no');
+        } catch (error) {
+          console.log('ERR', error instanceof Error ? error.message : String(error));
+        }
+      `);
+      assert(result.success === true, `payload should be handled without executor failure: ${payload}`);
+      const output = JSON.stringify(result.output ?? []);
+      assert(!output.includes(process.versions.node), `payload reached host process: ${payload}`);
+      assert(!output.includes('object'), `payload returned host object: ${payload}`);
+    }
+  });
+
   // ---- IsolatedVmExecutor with mocked isolate -------------------------------
 
   await runTest('VAL-SANDBOX-021: isolated executor uses memory limit and disposes (success)', async () => {

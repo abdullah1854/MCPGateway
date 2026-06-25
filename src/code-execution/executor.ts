@@ -67,6 +67,23 @@ function deepFreeze<T extends object>(obj: T, seen = new WeakSet()): T {
   return obj;
 }
 
+function hardenHostFunction<T extends object>(fn: T): T {
+  Object.setPrototypeOf(fn, null);
+  Object.defineProperty(fn, 'constructor', {
+    value: undefined,
+    writable: false,
+    configurable: false,
+    enumerable: false,
+  });
+  Object.defineProperty(fn, 'prototype', {
+    value: undefined,
+    writable: false,
+    configurable: false,
+    enumerable: false,
+  });
+  return Object.freeze(fn);
+}
+
 /**
  * Create a safe primitive wrapper that cannot leak its constructor
  * This wraps values so that .constructor access returns undefined
@@ -81,18 +98,7 @@ function createSafeWrapper<T>(fn: T): T {
     return (fn as (...args: unknown[]) => unknown).apply(this, args);
   };
 
-  // Override constructor to prevent escape
-  Object.defineProperty(wrapper, 'constructor', {
-    value: undefined,
-    writable: false,
-    configurable: false,
-    enumerable: false,
-  });
-
-  // Freeze the wrapper
-  Object.freeze(wrapper);
-
-  return wrapper as T;
+  return hardenHostFunction(wrapper) as T;
 }
 
 function safeParseProfile(raw?: string): DeploymentProfile {
@@ -479,7 +485,7 @@ export class CodeExecutor {
     });
     (safeStringFn as unknown as Record<string, unknown>).fromCharCode = createSafeWrapper((...codes: number[]) => String.fromCharCode(...codes));
     (safeStringFn as unknown as Record<string, unknown>).fromCodePoint = createSafeWrapper((...codePoints: number[]) => String.fromCodePoint(...codePoints));
-    const safeString = Object.freeze(safeStringFn);
+    const safeString = hardenHostFunction(safeStringFn);
 
     // Safe Number - callable as Number(value) for type conversion, plus static methods and constants
     const safeNumberFn = function (...args: unknown[]) {
@@ -506,7 +512,7 @@ export class CodeExecutor {
     for (const [k, v] of Object.entries(numberStatics)) {
       (safeNumberFn as unknown as Record<string, unknown>)[k] = v;
     }
-    const safeNumber = Object.freeze(safeNumberFn);
+    const safeNumber = hardenHostFunction(safeNumberFn);
 
     // Safe Date - allows `new Date()` while preventing constructor escapes
     // Returns a safe wrapper object with common date methods wrapped via createSafeWrapper
@@ -563,15 +569,7 @@ export class CodeExecutor {
     (SafeDate as unknown as Record<string, unknown>).parse = createSafeWrapper((dateString: string) => Date.parse(dateString));
     (SafeDate as unknown as Record<string, unknown>).UTC = createSafeWrapper((...args: number[]) => Date.UTC(...(args as Parameters<typeof Date.UTC>)));
 
-    // Hide SafeDate's own constructor
-    Object.defineProperty(SafeDate, 'constructor', {
-      value: undefined,
-      writable: false,
-      configurable: false,
-      enumerable: false,
-    });
-
-    const safeDate = Object.freeze(SafeDate);
+    const safeDate = hardenHostFunction(SafeDate);
 
     // Wrap tool functions to prevent constructor access
     // Return values are sanitized to prevent prototype chain access
@@ -583,14 +581,7 @@ export class CodeExecutor {
         // Sanitize the result to prevent constructor access on returned objects
         return JSON.parse(JSON.stringify(result)) as ToolCallResult;
       };
-      // Override constructor on the wrapper
-      Object.defineProperty(wrapper, 'constructor', {
-        value: undefined,
-        writable: false,
-        configurable: false,
-        enumerable: false,
-      });
-      safeToolFunctions[name] = Object.freeze(wrapper);
+      safeToolFunctions[name] = hardenHostFunction(wrapper);
     }
 
     // Create safe console with wrapped functions

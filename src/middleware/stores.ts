@@ -35,6 +35,7 @@ export interface RedisKeyValueClient {
   ping(): Promise<unknown>;
   get(key: string): Promise<string | null>;
   set(key: string, value: string, options?: { PX?: number }): Promise<unknown>;
+  eval(script: string, options: { keys: string[]; arguments: string[] }): Promise<unknown>;
   del(key: string): Promise<unknown>;
   quit?(): Promise<unknown>;
   disconnect?(): Promise<unknown>;
@@ -49,6 +50,26 @@ export interface RedisGatewayStoreOptions {
 
 const DEFAULT_NAMESPACE = 'mcp-gateway';
 const DEFAULT_MAX_RATE_LIMIT_ENTRIES = 10_000;
+const RATE_LIMIT_INCREMENT_SCRIPT = `
+local raw = redis.call('GET', KEYS[1])
+local now = tonumber(ARGV[1])
+local window_ms = tonumber(ARGV[2])
+local count = 1
+local reset_at = now + window_ms
+
+if raw then
+  local ok, existing = pcall(cjson.decode, raw)
+  if ok and type(existing) == 'table' and type(existing.count) == 'number' and type(existing.resetAt) == 'number' and now < existing.resetAt then
+    count = existing.count + 1
+    reset_at = existing.resetAt
+  end
+end
+
+local ttl_ms = math.max(1, reset_at - now)
+local entry = '{"count":' .. count .. ',"resetAt":' .. reset_at .. '}'
+redis.call('SET', KEYS[1], entry, 'PX', ttl_ms)
+return entry
+`.trim();
 
 function encodeKeyPart(value: string): string {
   return encodeURIComponent(value);
@@ -164,16 +185,14 @@ export class RedisRateLimitStore implements RateLimitStore {
   async increment(key: string, windowMs: number): Promise<RateLimitEntry> {
     const redisKey = this.keys.rateLimit(key);
     const now = this.now();
-    const raw = await this.client.get(redisKey);
-    const existing = raw ? parseRateLimitEntry(raw) : undefined;
-
-    const entry =
-      !existing || now >= existing.resetAt
-        ? { count: 1, resetAt: now + windowMs }
-        : { count: existing.count + 1, resetAt: existing.resetAt };
-
-    const ttlMs = Math.max(1, entry.resetAt - now);
-    await this.client.set(redisKey, stableCanonicalJson(entry), { PX: ttlMs });
+    const raw = await this.client.eval(RATE_LIMIT_INCREMENT_SCRIPT, {
+      keys: [redisKey],
+      arguments: [String(now), String(windowMs)],
+    });
+    const entry = typeof raw === 'string' ? parseRateLimitEntry(raw) : undefined;
+    if (!entry) {
+      throw new Error('Redis rate-limit script returned an invalid entry');
+    }
     return entry;
   }
 }

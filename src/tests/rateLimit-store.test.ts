@@ -28,6 +28,8 @@ class FakeRedisClient implements RedisKeyValueClient {
   readonly values = new Map<string, string>();
   readonly ttlMs = new Map<string, number>();
   connectCalls = 0;
+  evalCalls = 0;
+  getCalls = 0;
   pingCalls = 0;
   quitCalls = 0;
   private readonly failConnect: boolean;
@@ -49,6 +51,7 @@ class FakeRedisClient implements RedisKeyValueClient {
   }
 
   async get(key: string): Promise<string | null> {
+    this.getCalls++;
     return this.values.get(key) ?? null;
   }
 
@@ -58,6 +61,34 @@ class FakeRedisClient implements RedisKeyValueClient {
       this.ttlMs.set(key, options.PX);
     }
     return 'OK';
+  }
+
+  async eval(_script: string, options: { keys: string[]; arguments: string[] }): Promise<string> {
+    this.evalCalls++;
+    const [key] = options.keys;
+    const [nowRaw, windowMsRaw] = options.arguments;
+    const now = Number(nowRaw);
+    const windowMs = Number(windowMsRaw);
+    const raw = key ? this.values.get(key) : undefined;
+    const existing = raw ? JSON.parse(raw) as { count?: unknown; resetAt?: unknown } : undefined;
+    const active = Boolean(
+      existing &&
+      typeof existing.count === 'number' &&
+      typeof existing.resetAt === 'number' &&
+      now < existing.resetAt,
+    );
+    const entry = { count: 1, resetAt: now + windowMs };
+    if (active && typeof existing?.count === 'number' && typeof existing.resetAt === 'number') {
+      entry.count = existing.count + 1;
+      entry.resetAt = existing.resetAt;
+    }
+    const ttlMs = Math.max(1, entry.resetAt - now);
+    const serialized = stableCanonicalJson(entry);
+    if (key) {
+      this.values.set(key, serialized);
+      this.ttlMs.set(key, ttlMs);
+    }
+    return serialized;
   }
 
   async del(key: string): Promise<number> {
@@ -130,9 +161,29 @@ async function main(): Promise<void> {
     assert.equal(entry.count, 1);
     assert.equal(fake.ttlMs.get(key), 5_000);
     assert.match(fake.values.get(key) ?? '', /"count":1/);
+    assert.equal(fake.evalCalls, 1);
+    assert.equal(fake.getCalls, 0);
 
     await stores.close();
     assert.equal(fake.quitCalls, 1);
+  });
+
+  await runTest('STORE-001: Redis rate-limit increments are atomic eval operations', async () => {
+    const fake = new FakeRedisClient();
+    const stores = await createRedisGatewayStores({
+      namespace: 'test-suite',
+      clientFactory: () => fake,
+    });
+
+    const entries = await Promise.all([
+      stores.rateLimit.increment('10.0.0.2', 5_000),
+      stores.rateLimit.increment('10.0.0.2', 5_000),
+      stores.rateLimit.increment('10.0.0.2', 5_000),
+    ]);
+
+    assert.deepEqual(entries.map(entry => entry.count), [1, 2, 3]);
+    assert.equal(fake.evalCalls, 3);
+    assert.equal(fake.getCalls, 0);
   });
 
   await runTest('STORE-001: Redis adapter round-trips session dates with TTL', async () => {
