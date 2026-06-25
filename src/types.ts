@@ -33,12 +33,16 @@ export const TransportSchema = z.discriminatedUnion('type', [
 
 // Server configuration schema
 export const ServerConfigSchema = z.object({
-  id: z.string().regex(/^[a-z0-9-]+$/),
+  id: z.string().regex(/^[a-z0-9-]+$/, {
+    message: 'server id must contain only lowercase letters, numbers, and hyphens',
+  }),
   name: z.string(),
   description: z.string().optional(),
   enabled: z.boolean().default(true),
   transport: TransportSchema,
-  toolPrefix: z.string().regex(/^[a-z0-9_]+$/).optional(),
+  toolPrefix: z.string().regex(/^[a-z0-9_]+$/, {
+    message: 'toolPrefix must contain only lowercase letters, numbers, and underscores',
+  }).optional(),
   timeout: z.number().min(1000).max(300000).default(30000),
   retries: z.number().min(0).max(5).default(3),
 });

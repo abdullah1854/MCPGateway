@@ -257,6 +257,12 @@ Edit `config/servers.json` to add your MCP servers:
 }
 ```
 
+Server identity rules:
+
+- `id` is the stable backend identifier used by the gateway API and dashboard routes. It must be unique and contain only lowercase letters, numbers, and hyphens, for example `mssql-crm-prod`.
+- `name` is the human-readable display label. It can use spaces and title case, for example `CRM Production MSSQL`.
+- `toolPrefix` is the namespace prepended to tools from that backend. It must contain only lowercase letters, numbers, and underscores, for example `mssql_crm_prod`.
+
 ### 3. Start the Gateway
 
 ```bash
@@ -589,6 +595,16 @@ If you fork this repository:
 
 The gateway can connect to MCP servers using different transports:
 
+Each backend has three separate identity fields:
+
+| Field | Purpose | Format | Example |
+|-------|---------|--------|---------|
+| `id` | Stable machine identifier for config, API routes, dashboard actions, and backend filtering | Lowercase letters, numbers, hyphens | `mssql-crm-prod` |
+| `name` | Human-readable label shown to operators | Free-form string | `CRM Production MSSQL` |
+| `toolPrefix` | Tool namespace added before every tool exposed by the backend | Lowercase letters, numbers, underscores | `mssql_crm_prod` |
+
+Do not use the display `name` as a tool namespace. If a backend with `toolPrefix: "mssql_crm_prod"` exposes `execute_query`, clients call it as `mssql_crm_prod_execute_query`. The `id` may use hyphens because it identifies the backend; `toolPrefix` uses underscores because it becomes part of tool names.
+
 ### STDIO (Local Process)
 
 ```json
@@ -606,6 +622,60 @@ The gateway can connect to MCP servers using different transports:
   },
   "toolPrefix": "fs",
   "timeout": 30000
+}
+```
+
+### MSSQL (Docker STDIO)
+
+Use this pattern when the MSSQL MCP server is installed inside a Docker container and the gateway should talk to it over stdio:
+
+```json
+{
+  "id": "mssql-crm-prod",
+  "name": "CRM Production MSSQL",
+  "description": "Read-only CRM production database tools",
+  "enabled": true,
+  "transport": {
+    "type": "stdio",
+    "command": "docker",
+    "args": [
+      "exec",
+      "-i",
+      "mssql-crm-prod-mcp",
+      "node",
+      "node_modules/mssql-mcp/dist/index.js"
+    ]
+  },
+  "toolPrefix": "mssql_crm_prod",
+  "timeout": 60000
+}
+```
+
+With that configuration, a backend tool named `execute_query` is exposed through the gateway as `mssql_crm_prod_execute_query`.
+
+### MSSQL (NPX STDIO)
+
+Use this pattern when the gateway should launch the MSSQL MCP package directly. Keep credentials in environment variables or `${VAR}` references, not in the repository:
+
+```json
+{
+  "id": "mssql-hr-staging",
+  "name": "HR Staging MSSQL",
+  "description": "HR staging database tools",
+  "enabled": true,
+  "transport": {
+    "type": "stdio",
+    "command": "npx",
+    "args": ["-y", "mssql-mcp@latest"],
+    "env": {
+      "MSSQL_SERVER": "${HR_STAGING_SQL_SERVER}",
+      "MSSQL_DATABASE": "${HR_STAGING_SQL_DATABASE}",
+      "MSSQL_USER": "${HR_STAGING_SQL_USER}",
+      "MSSQL_PASSWORD": "${HR_STAGING_SQL_PASSWORD}"
+    }
+  },
+  "toolPrefix": "mssql_hr_stg",
+  "timeout": 60000
 }
 ```
 
@@ -633,6 +703,7 @@ The gateway can connect to MCP servers using different transports:
 Use `toolPrefix` to namespace tools from different servers:
 
 - Server with `toolPrefix: "fs"` exposes `read_file` as `fs_read_file`
+- Server with `toolPrefix: "mssql_crm_prod"` exposes `execute_query` as `mssql_crm_prod_execute_query`
 - Prevents naming collisions between servers
 - Makes it clear which server handles each tool
 

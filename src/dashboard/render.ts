@@ -1220,6 +1220,25 @@ export function getDashboardHTML(): string {
       color: var(--text-dimmed);
     }
 
+    .form-group.field-invalid label {
+      color: var(--error);
+    }
+
+    .form-group.field-invalid input,
+    .form-group.field-invalid select,
+    .form-group.field-invalid textarea {
+      border-color: var(--error);
+      box-shadow: 0 0 0 2px var(--error-glow);
+    }
+
+    .form-field-error {
+      display: block;
+      margin-top: 0.375rem;
+      color: var(--error);
+      font-size: 0.72rem;
+      line-height: 1.4;
+    }
+
     .form-row {
       display: grid;
       grid-template-columns: 1fr 1fr;
@@ -1258,6 +1277,30 @@ export function getDashboardHTML(): string {
       background: rgba(226, 169, 59, 0.1);
       border: 1px solid var(--accent);
       color: var(--accent);
+    }
+
+    .save-result {
+      margin-top: 1.25rem;
+      padding: 1rem;
+      border-radius: 12px;
+      font-size: 0.82rem;
+      line-height: 1.5;
+    }
+
+    .save-result.error {
+      background: rgba(239, 68, 68, 0.1);
+      border: 1px solid var(--error);
+      color: var(--error);
+    }
+
+    .save-result-title {
+      font-weight: 700;
+      margin-bottom: 0.375rem;
+    }
+
+    .save-result-list {
+      margin: 0.5rem 0 0;
+      padding-left: 1.125rem;
     }
 
     .backend-buttons {
@@ -3935,6 +3978,7 @@ export function getDashboardHTML(): string {
       document.getElementById('server-timeout').value = '30000';
       document.getElementById('server-enabled').checked = true;
       document.getElementById('test-result').innerHTML = '';
+      clearServerValidation();
       updateTransportFields();
       document.getElementById('server-modal').classList.add('show');
     }
@@ -3973,6 +4017,7 @@ export function getDashboardHTML(): string {
         }
 
         document.getElementById('test-result').innerHTML = '';
+        clearServerValidation();
         document.getElementById('server-modal').classList.add('show');
       } catch (err) {
         showToast('Failed to load server configuration', true);
@@ -3985,8 +4030,213 @@ export function getDashboardHTML(): string {
 
     function updateTransportFields() {
       const type = document.getElementById('transport-type').value;
-      document.getElementById('stdio-fields').style.display = type === 'stdio' ? 'block' : 'none';
-      document.getElementById('http-fields').style.display = (type === 'http' || type === 'sse') ? 'block' : 'none';
+      const isStdio = type === 'stdio';
+      const isHttpLike = type === 'http' || type === 'sse';
+      document.getElementById('stdio-fields').style.display = isStdio ? 'block' : 'none';
+      document.getElementById('http-fields').style.display = isHttpLike ? 'block' : 'none';
+      document.getElementById('stdio-command').required = isStdio;
+      document.getElementById('http-url').required = isHttpLike;
+
+      document.querySelectorAll('#stdio-fields input, #stdio-fields textarea').forEach((field) => {
+        field.disabled = !isStdio;
+      });
+      document.querySelectorAll('#http-fields input, #http-fields textarea').forEach((field) => {
+        field.disabled = !isHttpLike;
+      });
+    }
+
+    function getSaveResultDiv() {
+      let resultDiv = document.getElementById('save-result');
+      if (!resultDiv) {
+        resultDiv = document.createElement('div');
+        resultDiv.id = 'save-result';
+        resultDiv.setAttribute('role', 'alert');
+        const testResult = document.getElementById('test-result');
+        testResult.parentNode.insertBefore(resultDiv, testResult);
+      }
+      return resultDiv;
+    }
+
+    function clearServerValidation() {
+      const resultDiv = getSaveResultDiv();
+      resultDiv.className = '';
+      resultDiv.innerHTML = '';
+
+      document.querySelectorAll('#server-form .field-invalid').forEach((group) => {
+        group.classList.remove('field-invalid');
+      });
+      document.querySelectorAll('#server-form [aria-invalid="true"]').forEach((field) => {
+        field.removeAttribute('aria-invalid');
+        const describedBy = (field.getAttribute('aria-describedby') || '')
+          .split(' ')
+          .filter((id) => id && !id.endsWith('-error'))
+          .join(' ');
+        if (describedBy) {
+          field.setAttribute('aria-describedby', describedBy);
+        } else {
+          field.removeAttribute('aria-describedby');
+        }
+      });
+      document.querySelectorAll('#server-form .form-field-error').forEach((error) => {
+        error.remove();
+      });
+    }
+
+    function fieldPathToInputId(path) {
+      const key = Array.isArray(path) ? path.join('.') : String(path || '');
+      const fieldMap = {
+        id: 'server-id',
+        name: 'server-name',
+        description: 'server-description',
+        enabled: 'server-enabled',
+        toolPrefix: 'server-prefix',
+        timeout: 'server-timeout',
+        transport: 'transport-type',
+        'transport.type': 'transport-type',
+        'transport.command': 'stdio-command',
+        'transport.args': 'stdio-args',
+        'transport.env': 'stdio-env',
+        'transport.cwd': 'stdio-cwd',
+        'transport.url': 'http-url',
+        'transport.headers': 'http-headers',
+      };
+      return fieldMap[key] || '';
+    }
+
+    function fieldPathToLabel(path) {
+      const key = Array.isArray(path) ? path.join('.') : String(path || '');
+      const labelMap = {
+        id: 'Server ID',
+        name: 'Display Name',
+        description: 'Description',
+        enabled: 'Enabled',
+        toolPrefix: 'Tool Prefix',
+        timeout: 'Timeout',
+        transport: 'Transport Type',
+        'transport.type': 'Transport Type',
+        'transport.command': 'Command',
+        'transport.args': 'Arguments',
+        'transport.env': 'Environment Variables',
+        'transport.cwd': 'Working Directory',
+        'transport.url': 'URL',
+        'transport.headers': 'Headers',
+      };
+      return labelMap[key] || key || 'Server configuration';
+    }
+
+    function setServerFieldError(inputId, message) {
+      const field = document.getElementById(inputId);
+      if (!field) return;
+
+      const group = field.closest('.form-group');
+      if (group) {
+        group.classList.add('field-invalid');
+      }
+
+      field.setAttribute('aria-invalid', 'true');
+      const errorId = inputId + '-error';
+      const existingDescription = field.getAttribute('aria-describedby') || '';
+      if (!existingDescription.split(' ').includes(errorId)) {
+        field.setAttribute('aria-describedby', (existingDescription + ' ' + errorId).trim());
+      }
+
+      let errorEl = document.getElementById(errorId);
+      if (!errorEl) {
+        errorEl = document.createElement('span');
+        errorEl.id = errorId;
+        errorEl.className = 'form-field-error';
+        field.insertAdjacentElement('afterend', errorEl);
+      }
+      errorEl.textContent = message;
+    }
+
+    function collectApiFieldErrors(result) {
+      const fieldErrors = [];
+      const seen = new Set();
+
+      function addFieldError(path, message) {
+        const normalizedPath = Array.isArray(path) ? path.join('.') : String(path || '');
+        const normalizedMessage = String(message || '').trim();
+        const key = normalizedPath + '::' + normalizedMessage;
+        if (!normalizedMessage || seen.has(key)) return;
+        seen.add(key);
+        fieldErrors.push({ path: normalizedPath, message: normalizedMessage });
+      }
+
+      if (result && result.fieldErrors && typeof result.fieldErrors === 'object') {
+        Object.entries(result.fieldErrors).forEach(([path, messages]) => {
+          const messageList = Array.isArray(messages) ? messages : [messages];
+          messageList.forEach((message) => {
+            addFieldError(path, message);
+          });
+        });
+      }
+
+      if (result && Array.isArray(result.details)) {
+        result.details.forEach((detail) => {
+          if (!detail) return;
+          const path = detail.path || detail.field || '';
+          const message = detail.message || detail.error || String(detail);
+          addFieldError(path, message);
+        });
+      }
+
+      return fieldErrors;
+    }
+
+    function showServerSaveError(result, fallbackMessage) {
+      const resultDiv = getSaveResultDiv();
+      const title = (result && (result.error || result.message)) || fallbackMessage || 'Failed to save server';
+      const fieldErrors = collectApiFieldErrors(result);
+      const details = [];
+
+      if (result && result.error && result.message && result.message !== result.error) {
+        details.push(result.message);
+      }
+
+      fieldErrors.forEach(({ path, message }) => {
+        const label = fieldPathToLabel(path);
+        details.push(label + ': ' + message);
+        const inputId = fieldPathToInputId(path);
+        if (inputId) {
+          setServerFieldError(inputId, message);
+        }
+      });
+
+      if (result && result.details && !Array.isArray(result.details)) {
+        details.push(typeof result.details === 'string' ? result.details : JSON.stringify(result.details));
+      }
+
+      const detailHtml = details.length
+        ? '<ul class="save-result-list">' + details.map((detail) => '<li>' + escapeHtml(detail) + '</li>').join('') + '</ul>'
+        : '';
+      resultDiv.className = 'save-result error';
+      resultDiv.innerHTML =
+        '<div class="save-result-title">' + escapeHtml(title) + '</div>' +
+        '<div>' + escapeHtml(fallbackMessage || 'Check the highlighted fields and try again.') + '</div>' +
+        detailHtml;
+    }
+
+    function validateServerFormBeforeSave() {
+      const form = document.getElementById('server-form');
+      clearServerValidation();
+      updateTransportFields();
+
+      if (form.checkValidity()) {
+        return true;
+      }
+
+      const invalidField = form.querySelector(':invalid');
+      if (invalidField) {
+        setServerFieldError(invalidField.id, invalidField.validationMessage);
+        invalidField.focus();
+      }
+      showServerSaveError(
+        { error: 'Fix the highlighted fields before saving' },
+        'The server was not saved because the form contains invalid values.',
+      );
+      form.reportValidity();
+      return false;
     }
 
     function buildServerConfig() {
@@ -4060,6 +4310,77 @@ export function getDashboardHTML(): string {
       return config;
     }
 
+    function appendUniqueMessage(messages, message) {
+      const normalized = String(message || '').trim();
+      if (normalized && !messages.includes(normalized)) {
+        messages.push(normalized);
+      }
+    }
+
+    function formatFieldName(field) {
+      const fieldPath = Array.isArray(field) ? field.join('.') : field;
+      return String(fieldPath || 'server')
+        .replace(/^server\\./, '')
+        .replace(/\\.([0-9]+)(?=\\.|$)/g, '[$1]')
+        .replace(/\\./g, ' > ');
+    }
+
+    function getValidationMessages(result) {
+      const messages = [];
+      const fieldErrors = result && result.fieldErrors && typeof result.fieldErrors === 'object'
+        ? result.fieldErrors
+        : {};
+
+      Object.entries(fieldErrors).forEach(([field, fieldMessages]) => {
+        const list = Array.isArray(fieldMessages) ? fieldMessages : [fieldMessages];
+        list.forEach(message => {
+          appendUniqueMessage(messages, formatFieldName(field) + ': ' + message);
+        });
+      });
+
+      const details = Array.isArray(result && result.details) ? result.details : [];
+      details.forEach(detail => {
+        if (detail && typeof detail === 'object') {
+          appendUniqueMessage(messages, formatFieldName(detail.field || detail.path) + ': ' + detail.message);
+        } else {
+          appendUniqueMessage(messages, detail);
+        }
+      });
+
+      return messages;
+    }
+
+    function getConnectionFailureMessages(result) {
+      const messages = [];
+      appendUniqueMessage(messages, result && result.message);
+
+      const validationMessages = getValidationMessages(result);
+      validationMessages.forEach(message => appendUniqueMessage(messages, message));
+
+      if (messages.length === 0) {
+        appendUniqueMessage(messages, result && result.error);
+      }
+
+      return messages;
+    }
+
+    function showTestResult(resultDiv, state, title, messages) {
+      resultDiv.className = 'test-result ' + state;
+
+      const detailItems = (messages || [])
+        .filter(Boolean)
+        .map(message => '<li>' + escapeHtml(message) + '</li>')
+        .join('');
+
+      resultDiv.innerHTML =
+        '<div style="font-weight: 700; margin-bottom: ' + (detailItems ? '0.5rem' : '0') + ';">' +
+          escapeHtml(title) +
+        '</div>' +
+        (detailItems
+          ? '<ul style="margin: 0; padding-left: 1.25rem; line-height: 1.55;">' + detailItems + '</ul>'
+          : '');
+    }
+
     async function testServerConnection() {
       const resultDiv = document.getElementById('test-result');
 
@@ -4075,23 +4396,56 @@ export function getDashboardHTML(): string {
           body: JSON.stringify(config),
         });
 
-        const result = await res.json();
+        const result = await res.json().catch(() => ({
+          success: false,
+          error: 'Connection test failed',
+          message: 'The server returned HTTP ' + res.status + ' without a JSON error body.',
+        }));
 
-        if (result.success) {
-          resultDiv.className = 'test-result success';
-          resultDiv.textContent = 'Connection successful! Found ' + result.toolCount + ' tools, ' +
-            result.resourceCount + ' resources, ' + result.promptCount + ' prompts.';
+        if (res.ok && result.success) {
+          showTestResult(
+            resultDiv,
+            'success',
+            'Connection successful',
+            [
+              'Found ' + result.toolCount + ' tools, ' +
+                result.resourceCount + ' resources, ' +
+                result.promptCount + ' prompts.',
+            ]
+          );
         } else {
-          resultDiv.className = 'test-result error';
-          resultDiv.textContent = 'Connection failed: ' + (result.error || result.message || 'Unknown error');
+          const title = result.error === 'Invalid server configuration'
+            ? 'Invalid server configuration'
+            : 'Backend connection failed';
+
+          showTestResult(
+            resultDiv,
+            'error',
+            title,
+            getConnectionFailureMessages(result)
+          );
         }
       } catch (err) {
-        resultDiv.className = 'test-result error';
-        resultDiv.textContent = 'Error: ' + err.message;
+        showTestResult(
+          resultDiv,
+          'error',
+          'Unable to run connection test',
+          [err.message]
+        );
       }
     }
 
     async function saveServer() {
+      if (!validateServerFormBeforeSave()) {
+        return;
+      }
+
+      const saveButton = document.querySelector('#server-modal .btn-primary');
+      if (saveButton) {
+        saveButton.disabled = true;
+        saveButton.textContent = 'Saving...';
+      }
+
       try {
         const config = buildServerConfig();
         const editId = document.getElementById('edit-server-id').value;
@@ -4109,10 +4463,10 @@ export function getDashboardHTML(): string {
           body: JSON.stringify(config),
         });
 
-        const result = await res.json();
+        const result = await res.json().catch(() => ({}));
 
         if (!res.ok) {
-          showToast(result.error || result.message || 'Failed to save server', true);
+          showServerSaveError(result, 'Check the highlighted fields and try again.');
           return;
         }
 
@@ -4120,7 +4474,13 @@ export function getDashboardHTML(): string {
         showToast(isEdit ? 'Server updated successfully' : 'Server added successfully');
         loadData();
       } catch (err) {
-        showToast('Error: ' + err.message, true);
+        const message = err instanceof Error ? err.message : String(err);
+        showServerSaveError({ error: 'Could not save server', message }, 'Check the configuration and try again.');
+      } finally {
+        if (saveButton) {
+          saveButton.disabled = false;
+          saveButton.textContent = 'Save Server';
+        }
       }
     }
 

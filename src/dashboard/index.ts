@@ -6,6 +6,7 @@ import { Router, Request, Response } from 'express';
 import { exec } from 'child_process';
 import fs from 'fs';
 import path from 'path';
+import type { ZodError } from 'zod';
 import { BackendManager } from '../backend/index.js';
 import ConfigManager from '../config.js';
 import { ServerConfigSchema, ServerConfig } from '../types.js';
@@ -47,6 +48,54 @@ function persistUIState(backendManager: BackendManager): void {
     disabledTools: Array.from(backendManager.getDisabledTools()),
     disabledBackends: Array.from(backendManager.getDisabledBackends()),
   });
+}
+
+type ApiValidationError = {
+  error: string;
+  message: string;
+  fieldErrors: Record<string, string[]>;
+  details: Array<{
+    field: string;
+    message: string;
+    code: string;
+  }>;
+};
+
+function formatServerConfigValidationError(
+  error: ZodError<ServerConfig>,
+  options: {
+    error?: string;
+    pathPrefix?: string;
+  } = {}
+): ApiValidationError {
+  const fieldErrors: Record<string, string[]> = {};
+  const details = error.issues.map(issue => {
+    const fieldPath = issue.path.length > 0 ? issue.path.join('.') : 'server';
+    const field = options.pathPrefix ? `${options.pathPrefix}.${fieldPath}` : fieldPath;
+
+    fieldErrors[field] ??= [];
+    fieldErrors[field].push(issue.message);
+
+    return {
+      field,
+      message: issue.message,
+      code: issue.code,
+    };
+  });
+
+  const fieldCount = Object.keys(fieldErrors).length;
+  const firstDetail = details[0];
+  const message =
+    fieldCount === 1 && firstDetail
+      ? `Please fix ${firstDetail.field}: ${firstDetail.message}.`
+      : `Please fix ${fieldCount} fields in the server configuration.`;
+
+  return {
+    error: options.error ?? 'Invalid server configuration',
+    message,
+    fieldErrors,
+    details,
+  };
 }
 
 export function createDashboardRoutes(backendManager: BackendManager): Router {
@@ -369,10 +418,7 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
       // Validate the server configuration
       const parseResult = ServerConfigSchema.safeParse(req.body);
       if (!parseResult.success) {
-        res.status(400).json({
-          error: 'Invalid server configuration',
-          details: parseResult.error.errors,
-        });
+        res.status(400).json(formatServerConfigValidationError(parseResult.error));
         return;
       }
 
@@ -418,10 +464,7 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
       // Validate the new server configuration
       const parseResult = ServerConfigSchema.safeParse(req.body);
       if (!parseResult.success) {
-        res.status(400).json({
-          error: 'Invalid server configuration',
-          details: parseResult.error.errors,
-        });
+        res.status(400).json(formatServerConfigValidationError(parseResult.error));
         return;
       }
 
@@ -476,10 +519,7 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
       // Validate the server configuration
       const parseResult = ServerConfigSchema.safeParse(req.body);
       if (!parseResult.success) {
-        res.status(400).json({
-          error: 'Invalid server configuration',
-          details: parseResult.error.errors,
-        });
+        res.status(400).json(formatServerConfigValidationError(parseResult.error));
         return;
       }
 
@@ -536,7 +576,7 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
 
       // Validate each server configuration
       const validatedServers: ServerConfig[] = [];
-      const errors: Array<{ index: number; error: string }> = [];
+      const errors: Array<{ index: number } & ApiValidationError> = [];
 
       for (let i = 0; i < servers.length; i++) {
         const parseResult = ServerConfigSchema.safeParse(servers[i]);
@@ -545,14 +585,25 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
         } else {
           errors.push({
             index: i,
-            error: parseResult.error.errors.map(e => e.message).join(', '),
+            ...formatServerConfigValidationError(parseResult.error, {
+              pathPrefix: `servers.${i}`,
+            }),
           });
         }
       }
 
       if (errors.length > 0 && !merge) {
+        const fieldErrors = errors.reduce<Record<string, string[]>>((acc, item) => {
+          for (const [field, messages] of Object.entries(item.fieldErrors)) {
+            acc[field] = [...(acc[field] ?? []), ...messages];
+          }
+          return acc;
+        }, {});
+
         res.status(400).json({
           error: 'Invalid server configurations',
+          message: `Please fix ${errors.length} invalid server configuration${errors.length === 1 ? '' : 's'} before importing.`,
+          fieldErrors,
           details: errors,
         });
         return;
@@ -597,6 +648,17 @@ export function createDashboardRoutes(backendManager: BackendManager): Router {
         imported,
         skipped,
         total: validatedServers.length,
+        message: errors.length > 0
+          ? `Imported valid servers and skipped ${errors.length} invalid server configuration${errors.length === 1 ? '' : 's'}.`
+          : undefined,
+        fieldErrors: errors.length > 0
+          ? errors.reduce<Record<string, string[]>>((acc, item) => {
+              for (const [field, messages] of Object.entries(item.fieldErrors)) {
+                acc[field] = [...(acc[field] ?? []), ...messages];
+              }
+              return acc;
+            }, {})
+          : undefined,
         errors: errors.length > 0 ? errors : undefined,
       });
     } catch (error) {
