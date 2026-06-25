@@ -58,9 +58,40 @@ class FakeCompletionBackend extends EventEmitter implements Backend {
   }
 }
 
-function createManagerWithBackend(backend: Backend): BackendManager {
+class FakeResourceBackend extends EventEmitter implements Backend {
+  readonly id = 'fake-resource';
+  readonly config = {
+    id: 'fake-resource',
+    name: 'Fake Resource',
+    enabled: true,
+    transport: { type: 'stdio' as const, command: 'fake' },
+    timeout: 30000,
+    retries: 0,
+  };
+  readonly status: BackendStatus = 'connected';
+  readonly capabilities: MCPServerCapabilities = { resources: { subscribe: false, listChanged: true } };
+  readonly tools = [];
+  readonly resources = [{ uri: 'file:///resource-only.txt', name: 'resource-only.txt' }];
+  readonly prompts = [];
+  readonly error = undefined;
+  requests: MCPRequest[] = [];
+
+  async connect(): Promise<void> {}
+  async disconnect(): Promise<void> {}
+  unprefixToolName(name: string): string {
+    return name;
+  }
+  async sendRequest(request: MCPRequest): Promise<MCPResponse> {
+    this.requests.push(request);
+    return { jsonrpc: '2.0', id: request.id, result: {} };
+  }
+}
+
+function createManagerWithBackend(backend: Backend, ...otherBackends: Backend[]): BackendManager {
   const manager = new BackendManager();
-  manager.getBackends().set(backend.id, backend);
+  for (const candidate of [backend, ...otherBackends]) {
+    manager.getBackends().set(candidate.id, candidate);
+  }
   (manager as unknown as { updateMappings(): void }).updateMappings();
   return manager;
 }
@@ -137,6 +168,28 @@ async function main(): Promise<void> {
 
     assert.equal(response?.error?.code, -32602);
     assert.equal(backend.requests.length, 0);
+  });
+
+  await runTest('COMPLETE-004: resource completions do not fall back to unrelated backends', async () => {
+    const resourceBackend = new FakeResourceBackend();
+    const completionBackend = new FakeCompletionBackend();
+    const handler = new MCPProtocolHandler(createManagerWithBackend(resourceBackend, completionBackend));
+    const session = await handler.getOrCreateSession('session-complete-4');
+    session.initialized = true;
+
+    const response = await handler.handleMessage({
+      jsonrpc: '2.0',
+      id: 'complete-resource',
+      method: 'completion/complete',
+      params: {
+        ref: { type: 'ref/resource', uri: 'file:///resource-only.txt' },
+        argument: { name: 'path', value: 'kn' },
+      },
+    }, session);
+
+    assert.equal(response?.error?.code, -32602);
+    assert.equal(resourceBackend.requests.length, 0);
+    assert.equal(completionBackend.requests.length, 0);
   });
 
   console.log(`\nProtocol completion tests completed${failures ? ` with ${failures} failure(s)` : ''}.`);

@@ -198,14 +198,18 @@ export class RedisRateLimitStore implements RateLimitStore {
 }
 
 export class RedisSessionStore implements SessionStore {
+  private readonly sessionExpirations = new Map<string, number>();
+
   constructor(
     private readonly client: RedisKeyValueClient,
     private readonly keys: StoreKeyBuilder,
+    private readonly now = Date.now,
   ) {}
 
   async get(id: string): Promise<GatewaySession | undefined> {
     const raw = await this.client.get(this.keys.session(id));
     if (!raw) {
+      this.sessionExpirations.delete(id);
       return undefined;
     }
 
@@ -213,17 +217,30 @@ export class RedisSessionStore implements SessionStore {
   }
 
   async set(session: GatewaySession, ttlMs: number): Promise<void> {
+    const boundedTtlMs = Math.max(1, ttlMs);
     await this.client.set(this.keys.session(session.id), stableCanonicalJson(serializeSession(session)), {
-      PX: Math.max(1, ttlMs),
+      PX: boundedTtlMs,
     });
+    this.sessionExpirations.set(session.id, this.now() + boundedTtlMs);
   }
 
   async delete(id: string): Promise<void> {
     await this.client.del(this.keys.session(id));
+    this.sessionExpirations.delete(id);
   }
 
   async cleanupExpired(_maxAgeMs: number): Promise<string[]> {
-    return [];
+    const now = this.now();
+    const cleaned: string[] = [];
+
+    for (const [id, expiresAt] of this.sessionExpirations.entries()) {
+      if (now >= expiresAt) {
+        this.sessionExpirations.delete(id);
+        cleaned.push(id);
+      }
+    }
+
+    return cleaned;
   }
 }
 

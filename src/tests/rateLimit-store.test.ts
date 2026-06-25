@@ -4,6 +4,7 @@ import {
   InMemoryRateLimitStore,
   InMemorySessionStore,
   RedisKeyValueClient,
+  RedisSessionStore,
   stableCanonicalJson,
   StoreKeyBuilder,
 } from '../middleware/stores.js';
@@ -202,6 +203,19 @@ async function main(): Promise<void> {
     assert.ok(loaded?.createdAt instanceof Date);
     assert.ok(loaded?.lastActivityAt instanceof Date);
     assert.equal(loaded?.clientInfo?.name, 'test-client');
+  });
+
+  await runTest('STORE-001: Redis session cleanup returns locally expired session ids', async () => {
+    let now = 10_000;
+    const fake = new FakeRedisClient();
+    const store = new RedisSessionStore(fake, new StoreKeyBuilder('test-suite'), () => now);
+
+    await store.set(session('s-expiring'), 50);
+    assert.deepEqual(await store.cleanupExpired(60_000), []);
+
+    now = 10_050;
+    assert.deepEqual(await store.cleanupExpired(60_000), ['s-expiring']);
+    assert.deepEqual(await store.cleanupExpired(60_000), []);
   });
 
   await runTest('STORE-001: Redis store factory fails closed when Redis is unreachable', async () => {

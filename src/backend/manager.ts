@@ -696,7 +696,7 @@ export class BackendManager extends EventEmitter {
         return undefined;
       }
       const backendId = this.resourceToBackend.get(ref.uri);
-      return this.getCompletionBackendById(backendId) ?? this.getFirstCompletionBackend();
+      return this.getCompletionBackendById(backendId);
     }
 
     return undefined;
@@ -709,15 +709,6 @@ export class BackendManager extends EventEmitter {
     const backend = this.backends.get(backendId);
     if (backend?.status === 'connected' && supportsCompletion(backend.capabilities)) {
       return backend;
-    }
-    return undefined;
-  }
-
-  private getFirstCompletionBackend(): Backend | undefined {
-    for (const backend of this.backends.values()) {
-      if (backend.status === 'connected' && supportsCompletion(backend.capabilities)) {
-        return backend;
-      }
     }
     return undefined;
   }
