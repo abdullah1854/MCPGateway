@@ -16,6 +16,9 @@ import { logger } from '../logger.js';
 import { createGatewayTools, GatewayTool } from '../code-execution/gateway-tools/index.js';
 import { getPIITokenizerForSession, clearPIITokenizerForSession } from '../code-execution/pii-tokenizer.js';
 import { createInMemoryGatewayStores, SessionStore } from '../middleware/stores.js';
+import { enforceAuthorization } from '../middleware/authorization.js';
+import { AuditLogger } from '../monitoring/audit.js';
+import { GatewayToolCallContext } from '../code-execution/gateway-tools/types.js';
 
 const PROTOCOL_VERSION = '2024-11-05';
 const DEFAULT_SESSION_TTL_MS = 3600000;
@@ -48,6 +51,7 @@ export interface ToolCallMetrics {
 
 export interface MCPProtocolHandlerOptions {
   sessionStore?: SessionStore;
+  auditLogger?: AuditLogger;
 }
 
 export class MCPProtocolHandler {
@@ -56,9 +60,10 @@ export class MCPProtocolHandler {
   private gatewayName: string;
   private gatewayVersion: string;
   private gatewayTools: GatewayTool[];
-  private gatewayToolCall: (name: string, args: unknown, ctx?: { sessionId?: string }) => Promise<unknown>;
+  private gatewayToolCall: (name: string, args: unknown, ctx?: GatewayToolCallContext) => Promise<unknown>;
   private gatewayToolNames: Set<string>;
   private onToolCall?: (metrics: ToolCallMetrics) => void;
+  private auditLogger?: AuditLogger;
 
   constructor(
     backendManager: BackendManager,
@@ -70,6 +75,7 @@ export class MCPProtocolHandler {
     this.gatewayName = gatewayName;
     this.gatewayVersion = gatewayVersion;
     this.sessionStore = options.sessionStore ?? createInMemoryGatewayStores().sessions;
+    this.auditLogger = options.auditLogger;
 
     // Initialize gateway tools for progressive disclosure
     const { tools, callTool } = createGatewayTools(backendManager, {
@@ -332,9 +338,30 @@ export class MCPProtocolHandler {
 
     // Check if this is a gateway tool
     if (this.gatewayToolNames.has(params.name)) {
+      const decision = enforceAuthorization({
+        action: 'gateway_tool_call',
+        authorization: session.authorization,
+        gatewayToolName: params.name,
+        sessionId: session.id,
+        source: 'mcp',
+      }, this.auditLogger);
+      if (!decision.allowed) {
+        return {
+          jsonrpc: '2.0',
+          id: request.id,
+          error: {
+            code: MCPErrorCodes.InvalidRequest,
+            message: decision.reason,
+          },
+        };
+      }
       const gwStart = Date.now();
       try {
-        const result = await this.gatewayToolCall(params.name, params.arguments ?? {}, { sessionId: session.id });
+        const result = await this.gatewayToolCall(params.name, params.arguments ?? {}, {
+          sessionId: session.id,
+          authorization: session.authorization,
+          auditLogger: this.auditLogger,
+        });
         this.onToolCall?.({ toolName: params.name, backendId: 'gateway', durationMs: Date.now() - gwStart, success: true });
         return {
           jsonrpc: '2.0',
@@ -369,6 +396,23 @@ export class MCPProtocolHandler {
         error: {
           code: MCPErrorCodes.InvalidRequest,
           message: `Tool not allowed: ${params.name}`,
+        },
+      };
+    }
+    const decision = enforceAuthorization({
+      action: 'tool_call',
+      authorization: session.authorization,
+      toolName: params.name,
+      sessionId: session.id,
+      source: 'mcp',
+    }, this.auditLogger);
+    if (!decision.allowed) {
+      return {
+        jsonrpc: '2.0',
+        id: request.id,
+        error: {
+          code: MCPErrorCodes.InvalidRequest,
+          message: decision.reason,
         },
       };
     }

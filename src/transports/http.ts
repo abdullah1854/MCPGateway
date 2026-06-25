@@ -7,6 +7,8 @@ import { Request, Response, Router } from 'express';
 import { MCPProtocolHandler } from '../protocol/index.js';
 import { GatewaySession, MCPRequest, MCPMessage } from '../types.js';
 import { logger } from '../logger.js';
+import { AuthenticatedRequest } from '../middleware/auth.js';
+import { createAnonymousAuthorizationContext } from '../middleware/authorization.js';
 
 export function createHttpTransport(protocolHandler: MCPProtocolHandler): Router {
   const router = Router();
@@ -21,6 +23,7 @@ export function createHttpTransport(protocolHandler: MCPProtocolHandler): Router
 
     try {
       session = await protocolHandler.getOrCreateSession(sessionId);
+      attachAuthorization(session, req);
     } catch (error) {
       logger.error('Failed to load MCP session', {
         error: error instanceof Error ? error.message : String(error),
@@ -130,6 +133,11 @@ async function handleSingleRequest(
 
     res.status(500).json(errorResponse);
   }
+}
+
+function attachAuthorization(session: GatewaySession, req: Request): void {
+  session.authorization =
+    (req as AuthenticatedRequest).auth ?? createAnonymousAuthorizationContext();
 }
 
 /**

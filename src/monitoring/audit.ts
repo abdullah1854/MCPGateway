@@ -27,7 +27,8 @@ export type AuditEventType =
   | 'config_import'
   | 'auth_success'
   | 'auth_failure'
-  | 'rate_limit_exceeded';
+  | 'rate_limit_exceeded'
+  | 'policy_deny';
 
 export interface AuditEvent {
   timestamp: Date;
@@ -289,6 +290,24 @@ export class AuditLogger {
       details: { method },
       success,
       errorMessage,
+    });
+  }
+
+  logPolicyDeny(input: {
+    actor?: string;
+    ip?: string;
+    target?: string;
+    reason: string;
+    details?: Record<string, unknown>;
+  }): void {
+    this.log({
+      eventType: 'policy_deny',
+      actor: input.actor,
+      ip: input.ip,
+      target: input.target,
+      details: input.details,
+      success: false,
+      errorMessage: input.reason,
     });
   }
 

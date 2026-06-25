@@ -15,6 +15,9 @@ import { join, resolve, sep } from 'path';
 import { WorkspaceManager } from './workspace.js';
 import { CodeExecutor, ExecutionResult } from './executor.js';
 import { logger } from '../logger.js';
+import { AuthorizationContext } from '../types.js';
+import { AuditLogger } from '../monitoring/audit.js';
+import { AuthorizationSource } from '../middleware/authorization.js';
 
 const SKILL_NAME_REGEX = /^[A-Za-z0-9][A-Za-z0-9_-]*$/;
 
@@ -133,6 +136,14 @@ export interface SkillExecutionResult extends ExecutionResult {
   skillName: string;
   category?: SkillCategory;
   mcpToolsCalled?: string[];
+}
+
+export interface SkillExecutionOptions {
+  sessionId?: string;
+  timeout?: number;
+  authorization?: AuthorizationContext;
+  auditLogger?: AuditLogger;
+  source?: AuthorizationSource;
 }
 
 export interface SkillSearchOptions {
@@ -721,7 +732,7 @@ export class SkillsManager {
   async executeSkill(
     name: string,
     inputs: Record<string, unknown> = {},
-    options?: { sessionId?: string; timeout?: number }
+    options?: SkillExecutionOptions
   ): Promise<SkillExecutionResult> {
     const skill = this.getSkill(name);
 
@@ -768,6 +779,9 @@ export class SkillsManager {
       context: { inputs, ...inputs },
       sessionId: options?.sessionId,
       timeout: options?.timeout ?? 60000,
+      authorization: options?.authorization,
+      auditLogger: options?.auditLogger,
+      source: options?.source,
     });
 
     return {
@@ -783,7 +797,7 @@ export class SkillsManager {
   async executeSkillChain(
     skillNames: string[],
     initialInputs: Record<string, unknown> = {},
-    options?: { sessionId?: string; timeout?: number }
+    options?: SkillExecutionOptions
   ): Promise<SkillExecutionResult[]> {
     const results: SkillExecutionResult[] = [];
     let currentInputs = { ...initialInputs };

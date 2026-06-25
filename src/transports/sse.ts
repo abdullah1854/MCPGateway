@@ -7,6 +7,8 @@ import { Request, Response, Router } from 'express';
 import { MCPProtocolHandler } from '../protocol/index.js';
 import { GatewaySession, MCPRequest, MCPMessage } from '../types.js';
 import { logger } from '../logger.js';
+import { AuthenticatedRequest } from '../middleware/auth.js';
+import { createAnonymousAuthorizationContext } from '../middleware/authorization.js';
 
 interface SSEConnection {
   sessionId: string;
@@ -42,6 +44,7 @@ export function createSseTransport(protocolHandler: MCPProtocolHandler): Router 
 
     try {
       session = await protocolHandler.getOrCreateSession(sessionId);
+      attachAuthorization(session, req);
     } catch (error) {
       logger.error('Failed to load SSE session', {
         error: error instanceof Error ? error.message : String(error),
@@ -149,6 +152,7 @@ export function createSseTransport(protocolHandler: MCPProtocolHandler): Router 
       });
       return;
     }
+    attachAuthorization(session, req);
 
     const body = req.body as MCPMessage;
 
@@ -246,4 +250,9 @@ export function sendToSession(sessionId: string, event: string, data: unknown): 
     return true;
   }
   return false;
+}
+
+function attachAuthorization(session: GatewaySession, req: Request): void {
+  session.authorization =
+    (req as AuthenticatedRequest).auth ?? createAnonymousAuthorizationContext();
 }

@@ -188,10 +188,18 @@ export interface GatewaySession {
   createdAt: Date;
   lastActivityAt: Date;
   initialized: boolean;
+  authorization?: AuthorizationContext;
   clientInfo?: {
     name?: string;
     version?: string;
   };
+}
+
+export interface AuthorizationContext {
+  type: 'anonymous' | 'api-key' | 'oauth';
+  subject: string;
+  scopes: string[];
+  claims?: Record<string, unknown>;
 }
 
 // Request/Response types for MCP protocol

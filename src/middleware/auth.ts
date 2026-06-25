@@ -11,8 +11,13 @@
 import { Request, Response, NextFunction } from 'express';
 import { timingSafeEqual } from 'crypto';
 import jwt from 'jsonwebtoken';
-import { GatewayConfig } from '../types.js';
+import { AuthorizationContext, GatewayConfig } from '../types.js';
 import { logger } from '../logger.js';
+import {
+  createAnonymousAuthorizationContext,
+  createApiKeyAuthorizationContext,
+  createOAuthAuthorizationContext,
+} from './authorization.js';
 
 // JWKS cache with TTL
 interface JWKSCache {
@@ -43,11 +48,7 @@ function constantTimeCompare(a: string, b: string): boolean {
 }
 
 export interface AuthenticatedRequest extends Request {
-  auth?: {
-    type: 'api-key' | 'oauth';
-    subject?: string;
-    claims?: Record<string, unknown>;
-  };
+  auth?: AuthorizationContext;
 }
 
 /**
@@ -61,6 +62,7 @@ export function createAuthMiddleware(config: GatewayConfig) {
     // By default, dashboard, code-execution API, and JSON metrics are NOT
     // accessible without auth unless explicitly opted in via ALLOW_INSECURE=1.
     if (authMode === 'none') {
+      req.auth = createAnonymousAuthorizationContext();
       // Use originalUrl to get the full path before router processing
       const path = req.originalUrl || req.path || '';
       const isSensitiveEndpoint =
@@ -162,9 +164,7 @@ async function validateApiKey(req: AuthenticatedRequest, config: GatewayConfig):
     throw new Error('Invalid API key');
   }
 
-  req.auth = {
-    type: 'api-key',
-  };
+  req.auth = createApiKeyAuthorizationContext(apiKey);
 }
 
 /**
@@ -248,11 +248,7 @@ async function validateOAuth(req: AuthenticatedRequest, config: GatewayConfig): 
         audience: oauthConfig.audience,
       }) as jwt.JwtPayload;
 
-      req.auth = {
-        type: 'oauth',
-        subject: decoded.sub,
-        claims: decoded as Record<string, unknown>,
-      };
+      req.auth = createOAuthAuthorizationContext(decoded as Record<string, unknown>);
       return;
     }
 
@@ -265,11 +261,7 @@ async function validateOAuth(req: AuthenticatedRequest, config: GatewayConfig): 
       audience: oauthConfig.audience,
     }) as jwt.JwtPayload;
 
-    req.auth = {
-      type: 'oauth',
-      subject: decoded.sub,
-      claims: decoded as Record<string, unknown>,
-    };
+    req.auth = createOAuthAuthorizationContext(decoded as Record<string, unknown>);
   } catch (error) {
     if (error instanceof jwt.JsonWebTokenError) {
       throw new Error(`Token validation failed: ${error.message}`);
@@ -439,4 +431,3 @@ export function createOptionalAuthMiddleware(config: GatewayConfig) {
     next();
   };
 }
-

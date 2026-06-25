@@ -16,7 +16,7 @@
  */
 
 import { BackendManager } from '../backend/index.js';
-import { MCPResponse } from '../types.js';
+import { AuthorizationContext, MCPResponse } from '../types.js';
 import { logger } from '../logger.js';
 import { PIITokenizer, getPIITokenizerForSession } from './pii-tokenizer.js';
 import {
@@ -33,6 +33,12 @@ import {
   probeIsolationCapability,
 } from './sandbox/isolation.js';
 import { defaultSandboxExecutorFactory } from './sandbox/factory.js';
+import {
+  createAnonymousAuthorizationContext,
+  enforceAuthorization,
+  AuthorizationSource,
+} from '../middleware/authorization.js';
+import { AuditLogger } from '../monitoring/audit.js';
 
 /**
  * Deep freeze an object and all nested objects to prevent prototype access
@@ -110,6 +116,9 @@ export interface ExecutionOptions {
   context?: Record<string, unknown>;
   /** Session ID to scope stateful features like PII tokenization */
   sessionId?: string;
+  authorization?: AuthorizationContext;
+  auditLogger?: AuditLogger;
+  source?: AuthorizationSource;
 }
 
 export type SandboxErrorKind =
@@ -697,6 +706,9 @@ export class CodeExecutor {
       prettyConsole = false,
       context = {},
       sessionId,
+      authorization = createAnonymousAuthorizationContext(),
+      auditLogger,
+      source = 'sandbox',
     } = options;
 
     const tokenizer = this.getTokenizer(sessionId);
@@ -709,6 +721,27 @@ export class CodeExecutor {
     // may be observed. This neutralizes delayed console output, runaway
     // timer/microtask chains, and post-timeout tool calls in the vm path.
     let finished = false;
+
+    const codeDecision = enforceAuthorization({
+      action: 'code_execute',
+      authorization,
+      sessionId,
+      source,
+    }, auditLogger);
+    if (!codeDecision.allowed) {
+      return {
+        success: false,
+        output: [],
+        error: agentError({
+          what: 'Code execution was denied by authorization policy.',
+          cause: codeDecision.reason,
+          action: 'Use an API key or OAuth token with the code:execute scope.',
+        }),
+        errorKind: 'security',
+        hints: ['Required scope: code:execute'],
+        executionTime: Date.now() - startTime,
+      };
+    }
 
     // Resolve the isolation policy BEFORE building or running any sandbox. For
     // protected profiles (and SANDBOX_ISOLATE=1) without available isolation we
@@ -750,7 +783,14 @@ export class CodeExecutor {
     }
 
     // Create tool call functions
-    const toolFunctions = this.createToolFunctions(tokenizer, () => finished);
+    const toolFunctions = this.createToolFunctions(
+      tokenizer,
+      () => finished,
+      authorization,
+      auditLogger,
+      source,
+      sessionId,
+    );
 
     // Create console capture
     const consoleCapture = {
@@ -846,6 +886,10 @@ export class CodeExecutor {
   private createToolFunctions(
     tokenizer: PIITokenizer | null,
     isFinished: () => boolean = () => false,
+    authorization: AuthorizationContext = createAnonymousAuthorizationContext(),
+    auditLogger?: AuditLogger,
+    source: AuthorizationSource = 'sandbox',
+    sessionId?: string,
   ): Record<string, (...args: unknown[]) => Promise<ToolCallResult>> {
     const functions: Record<string, (...args: unknown[]) => Promise<ToolCallResult>> = {};
     const backends = this.backendManager.getBackends();
@@ -864,6 +908,16 @@ export class CodeExecutor {
 
         functions[safeName] = async (args: unknown = {}) => {
           if (isFinished()) return finishedResult();
+          const decision = enforceAuthorization({
+            action: 'tool_call',
+            authorization,
+            toolName: tool.name,
+            sessionId,
+            source,
+          }, auditLogger);
+          if (!decision.allowed) {
+            return { success: false, error: decision.reason };
+          }
           try {
             const response: MCPResponse = await this.backendManager.callTool(
               tool.name,
@@ -911,6 +965,16 @@ export class CodeExecutor {
 
       if (!this.isProgrammaticToolAllowed(toolName)) {
         return { success: false, error: toolAllowlistDeniedMessage(toolName) };
+      }
+      const decision = enforceAuthorization({
+        action: 'tool_call',
+        authorization,
+        toolName,
+        sessionId,
+        source,
+      }, auditLogger);
+      if (!decision.allowed) {
+        return { success: false, error: decision.reason };
       }
 
       try {

@@ -43,14 +43,14 @@ export class MCPGatewayServer {
     this.stores = stores;
     this.app = express();
     this.backendManager = new BackendManager();
+    this.auditLogger = new AuditLogger();
     this.protocolHandler = new MCPProtocolHandler(
       this.backendManager,
       config.name,
       '1.0.0',
-      { sessionStore: stores.sessions },
+      { sessionStore: stores.sessions, auditLogger: this.auditLogger },
     );
     this.metricsCollector = new MetricsCollector();
-    this.auditLogger = new AuditLogger();
     this.healthTimeline = new HealthTimelineService();
     this.toolAnalytics = new ToolAnalyticsService();
 
@@ -212,7 +212,7 @@ export class MCPGatewayServer {
     this.app.use('/dashboard', createDashboardRoutes(this.backendManager));
 
     // Code Execution API (Progressive Tool Disclosure + Code Mode)
-    this.app.use('/api/code', createCodeExecutionRoutes(this.backendManager));
+    this.app.use('/api/code', createCodeExecutionRoutes(this.backendManager, this.auditLogger));
 
     // Metrics & Monitoring (Prometheus format)
     this.app.use('/', createMetricsRoutes(this.backendManager, this.metricsCollector));

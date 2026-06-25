@@ -20,6 +20,10 @@ import { SkillsManager, isValidSkillName, SKILL_CATEGORIES, SkillCategory } from
 import { ResultCache } from './cache.js';
 import { getPIITokenizerForSession } from './pii-tokenizer.js';
 import { z } from 'zod';
+import { AuthenticatedRequest } from '../middleware/auth.js';
+import { createAnonymousAuthorizationContext, enforceAuthorization } from '../middleware/authorization.js';
+import { AuditLogger } from '../monitoring/audit.js';
+import { AuthorizationContext } from '../types.js';
 
 const requireAllowlist = process.env.CODE_EXECUTION_REQUIRE_ALLOWLIST === '1';
 const allowedTools = (process.env.CODE_EXECUTION_ALLOWED_TOOLS ?? '')
@@ -41,6 +45,10 @@ function isProgrammaticToolAllowed(toolName: string): boolean {
 
 function getSessionId(req: Request): string | undefined {
   return (req.headers['mcp-session-id'] as string) || (req.headers['x-session-id'] as string);
+}
+
+function getAuthorization(req: Request): AuthorizationContext {
+  return (req as AuthenticatedRequest).auth ?? createAnonymousAuthorizationContext();
 }
 
 // Request validation schemas
@@ -147,7 +155,7 @@ const SkillSchema = z.object({
 // Schema for partial updates (all fields optional except identifying ones)
 const SkillUpdateSchema = SkillSchema.partial().omit({ name: true });
 
-export function createCodeExecutionRoutes(backendManager: BackendManager): Router {
+export function createCodeExecutionRoutes(backendManager: BackendManager, auditLogger?: AuditLogger): Router {
   const router = Router();
   const toolDiscovery = new ToolDiscovery(backendManager);
   const codeExecutor = new CodeExecutor(backendManager);
@@ -357,12 +365,16 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
       const { code, timeout, context } = parseResult.data;
 
       const sessionId = getSessionId(req);
+      const authorization = getAuthorization(req);
 
       const result = await codeExecutor.execute(code, {
         timeout,
         context,
         captureConsole: true,
         sessionId,
+        authorization,
+        auditLogger,
+        source: 'code-api',
       });
 
       res.json(result);
@@ -409,6 +421,20 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
         res.status(403).json({
           success: false,
           error: `Tool not allowed for programmatic calls: ${name}`,
+        });
+        return;
+      }
+      const decision = enforceAuthorization({
+        action: 'tool_call',
+        authorization: getAuthorization(req),
+        toolName: name,
+        sessionId: getSessionId(req),
+        source: 'code-api',
+      }, auditLogger);
+      if (!decision.allowed) {
+        res.status(403).json({
+          success: false,
+          error: decision.reason,
         });
         return;
       }
@@ -466,6 +492,20 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
         res.status(403).json({
           success: false,
           error: `Tool not allowed for programmatic calls: ${name}`,
+        });
+        return;
+      }
+      const decision = enforceAuthorization({
+        action: 'tool_call',
+        authorization: getAuthorization(req),
+        toolName: name,
+        sessionId: getSessionId(req),
+        source: 'code-api',
+      }, auditLogger);
+      if (!decision.allowed) {
+        res.status(403).json({
+          success: false,
+          error: decision.reason,
         });
         return;
       }
@@ -559,6 +599,20 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
           res.status(403).json({
             success: false,
             error: `Tool not allowed for programmatic calls: ${c.toolName}`,
+          });
+          return;
+        }
+        const decision = enforceAuthorization({
+          action: 'tool_call',
+          authorization: getAuthorization(req),
+          toolName: c.toolName,
+          sessionId: getSessionId(req),
+          source: 'code-api',
+        }, auditLogger);
+        if (!decision.allowed) {
+          res.status(403).json({
+            success: false,
+            error: decision.reason,
           });
           return;
         }
@@ -725,6 +779,9 @@ export function createCodeExecutionRoutes(backendManager: BackendManager): Route
 
       const results = await skillsManager.executeSkillChain(skillNames, inputs, {
         sessionId: getSessionId(req),
+        authorization: getAuthorization(req),
+        auditLogger,
+        source: 'code-api',
       });
 
       res.json({

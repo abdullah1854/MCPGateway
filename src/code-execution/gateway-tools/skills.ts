@@ -1,5 +1,5 @@
 import { SkillsManager, isValidSkillName, SKILL_CATEGORIES, SkillCategory } from '../skills.js';
-import { GatewayTool, GatewayToolsConfig } from './types.js';
+import { GatewayTool, GatewayToolCallContext, GatewayToolsConfig } from './types.js';
 
 export function getSkillsTools(config: GatewayToolsConfig, liteMode: boolean): GatewayTool[] {
     const prefix = config.prefix ?? 'gateway';
@@ -340,7 +340,7 @@ export async function handleSkillsToolCall(
     params: Record<string, unknown>,
     skillsManager: SkillsManager,
     config: GatewayToolsConfig,
-    ctx?: { sessionId?: string }
+    ctx?: GatewayToolCallContext
 ): Promise<unknown> {
     const prefix = config.prefix ?? 'gateway';
 
@@ -374,7 +374,12 @@ export async function handleSkillsToolCall(
             return { error: 'Invalid skill name' };
         }
         const inputs = params.inputs as Record<string, unknown> || {};
-        return await skillsManager.executeSkill(skillName, inputs, { sessionId: ctx?.sessionId });
+        return await skillsManager.executeSkill(skillName, inputs, {
+            sessionId: ctx?.sessionId,
+            authorization: ctx?.authorization,
+            auditLogger: ctx?.auditLogger,
+            source: 'gateway-wrapper',
+        });
     }
 
     if (name === `${prefix}_create_skill`) {
@@ -439,7 +444,12 @@ export async function handleSkillsToolCall(
     if (name === `${prefix}_execute_skill_chain`) {
         const skillNames = params.skillNames as string[];
         const initialInputs = params.inputs as Record<string, unknown> || {};
-        return await skillsManager.executeSkillChain(skillNames, initialInputs, { sessionId: ctx?.sessionId });
+        return await skillsManager.executeSkillChain(skillNames, initialInputs, {
+            sessionId: ctx?.sessionId,
+            authorization: ctx?.authorization,
+            auditLogger: ctx?.auditLogger,
+            source: 'gateway-wrapper',
+        });
     }
 
     if (name === `${prefix}_import_skill`) {

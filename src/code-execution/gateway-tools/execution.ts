@@ -8,8 +8,9 @@ import { analyzeCode, getQueryPlanSummary } from '../query-planner.js';
 import { getPIITokenizerForSession } from '../pii-tokenizer.js';
 import { summarizeResponse } from '../response-summarizer.js';
 import { Aggregations } from '../streaming.js';
-import { GatewayTool, GatewayToolsConfig } from './types.js';
+import { GatewayTool, GatewayToolCallContext, GatewayToolsConfig } from './types.js';
 import { applyResultFilter } from './filtering.js';
+import { enforceAuthorization } from '../../middleware/authorization.js';
 
 export function getExecutionTools(config: GatewayToolsConfig, liteMode: boolean): GatewayTool[] {
     const prefix = config.prefix ?? 'gateway';
@@ -329,7 +330,7 @@ export async function handleExecutionToolCall(
     schemaDeduplicator: SchemaDeduplicator,
     isProgrammaticToolAllowed: (name: string) => boolean,
     config: GatewayToolsConfig,
-    ctx?: { sessionId?: string }
+    ctx?: GatewayToolCallContext
 ): Promise<unknown> {
     const prefix = config.prefix ?? 'gateway';
     const enableCodeExecution = config.enableCodeExecution ?? true;
@@ -370,6 +371,16 @@ export async function handleExecutionToolCall(
 
     // Code Execution
     if (name === `${prefix}_execute_code`) {
+        const decision = enforceAuthorization({
+            action: 'code_execute',
+            authorization: ctx?.authorization,
+            sessionId: ctx?.sessionId,
+            source: 'gateway-wrapper',
+        }, ctx?.auditLogger);
+        if (!decision.allowed) {
+            return { success: false, error: decision.reason };
+        }
+
         const code = params.code as string;
         const timeout = params.timeout as number | undefined;
         const context = params.context as Record<string, unknown> | undefined;
@@ -379,6 +390,9 @@ export async function handleExecutionToolCall(
             context,
             captureConsole: true,
             sessionId: ctx?.sessionId,
+            authorization: ctx?.authorization,
+            auditLogger: ctx?.auditLogger,
+            source: 'gateway-wrapper',
         });
     }
 
@@ -391,6 +405,16 @@ export async function handleExecutionToolCall(
 
         if (!isProgrammaticToolAllowed(toolName)) {
             return { success: false, error: `Tool not allowed for programmatic calls: ${toolName}` };
+        }
+        const decision = enforceAuthorization({
+            action: 'tool_call',
+            authorization: ctx?.authorization,
+            toolName,
+            sessionId: ctx?.sessionId,
+            source: 'gateway-wrapper',
+        }, ctx?.auditLogger);
+        if (!decision.allowed) {
+            return { success: false, error: decision.reason };
         }
 
         // Auto-increase timeout for search/research tools if not specified
@@ -437,6 +461,16 @@ export async function handleExecutionToolCall(
 
         if (!isProgrammaticToolAllowed(toolName)) {
             return { success: false, error: `Tool not allowed for programmatic calls: ${toolName}` };
+        }
+        const decision = enforceAuthorization({
+            action: 'tool_call',
+            authorization: ctx?.authorization,
+            toolName,
+            sessionId: ctx?.sessionId,
+            source: 'gateway-wrapper',
+        }, ctx?.auditLogger);
+        if (!decision.allowed) {
+            return { success: false, error: decision.reason };
         }
 
         const response = await backendManager.callTool(toolName, toolArgs);
@@ -493,6 +527,16 @@ export async function handleExecutionToolCall(
             if (!isProgrammaticToolAllowed(c.toolName)) {
                 return { success: false, error: `Tool not allowed for programmatic calls: ${c.toolName}` };
             }
+            const decision = enforceAuthorization({
+                action: 'tool_call',
+                authorization: ctx?.authorization,
+                toolName: c.toolName,
+                sessionId: ctx?.sessionId,
+                source: 'gateway-wrapper',
+            }, ctx?.auditLogger);
+            if (!decision.allowed) {
+                return { success: false, error: decision.reason };
+            }
         }
 
         // Execute calls in parallel with their respective timeouts
@@ -548,6 +592,16 @@ export async function handleExecutionToolCall(
         // Check if tool is allowed
         if (!isProgrammaticToolAllowed(toolName)) {
             return { error: `Tool '${toolName}' is not in the allowed list for programmatic access` };
+        }
+        const decision = enforceAuthorization({
+            action: 'tool_call',
+            authorization: ctx?.authorization,
+            toolName,
+            sessionId: ctx?.sessionId,
+            source: 'gateway-wrapper',
+        }, ctx?.auditLogger);
+        if (!decision.allowed) {
+            return { error: decision.reason };
         }
 
         // Find the backend and execute the tool
@@ -608,6 +662,16 @@ export async function handleExecutionToolCall(
         // Check if tool is allowed
         if (!isProgrammaticToolAllowed(toolName)) {
             return { error: `Tool '${toolName}' is not in the allowed list for programmatic access` };
+        }
+        const decision = enforceAuthorization({
+            action: 'tool_call',
+            authorization: ctx?.authorization,
+            toolName,
+            sessionId: ctx?.sessionId,
+            source: 'gateway-wrapper',
+        }, ctx?.auditLogger);
+        if (!decision.allowed) {
+            return { error: decision.reason };
         }
 
         // Find the backend and execute the tool

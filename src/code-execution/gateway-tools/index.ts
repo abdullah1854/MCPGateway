@@ -6,7 +6,7 @@ import { SkillsManager } from '../skills.js';
 import { WorkspaceManager } from '../workspace.js';
 import { SchemaDeduplicator } from '../schema-dedup.js';
 import ConfigManager from '../../config.js';
-import { GatewayTool, GatewayToolsConfig } from './types.js';
+import { GatewayTool, GatewayToolCallContext, GatewayToolsConfig } from './types.js';
 import { getDiscoveryTools, handleDiscoveryToolCall } from './discovery.js';
 import { getExecutionTools, handleExecutionToolCall } from './execution.js';
 import { getSkillsTools, handleSkillsToolCall } from './skills.js';
@@ -21,7 +21,7 @@ export type { GatewayTool, GatewayToolsConfig } from './types.js';
 export function createGatewayTools(
     backendManager: BackendManager,
     config: GatewayToolsConfig = {}
-): { tools: GatewayTool[]; callTool: (name: string, args: unknown, ctx?: { sessionId?: string }) => Promise<unknown> } {
+): { tools: GatewayTool[]; callTool: (name: string, args: unknown, ctx?: GatewayToolCallContext) => Promise<unknown> } {
     // Check lite mode from config parameter, ConfigManager, or env var
     const configManager = ConfigManager.getInstance();
     const liteMode = config.liteMode ?? configManager.isLiteModeEnabled();
@@ -60,7 +60,7 @@ export function createGatewayTools(
     /**
      * Main tool call handler that delegates to sub-modules
      */
-    async function callTool(name: string, args: unknown, ctx?: { sessionId?: string }): Promise<unknown> {
+    async function callTool(name: string, args: unknown, ctx?: GatewayToolCallContext): Promise<unknown> {
         const params = (args || {}) as Record<string, unknown>;
 
         // Try Discovery Tools
