@@ -285,6 +285,43 @@ For secure usage, prefer:
 - `AUTH_MODE=api-key` with `API_KEYS=key1,key2`
 - or `AUTH_MODE=oauth` with the appropriate `OAUTH_*` settings shown below.
 
+### Hardening Setup
+
+Use `DEPLOYMENT_PROFILE` to make the gateway fail closed for the environment you are running:
+
+| Profile | Intended use | Code isolation | Store requirement |
+|---------|--------------|----------------|-------------------|
+| `local-single-user` | Trusted local development | Node `vm` by default, `SANDBOX_ISOLATE=1` optional | `memory` default |
+| `shared-local` | Shared workstation or LAN | Strong isolation required | `memory` allowed |
+| `remote-private` | Private remote service | Strong isolation required | `memory` allowed |
+| `remote-public` | Internet-facing service | Strong isolation required | `redis` required |
+
+Protected profiles (`shared-local`, `remote-private`, `remote-public`) require:
+
+- `AUTH_MODE=api-key` or `AUTH_MODE=oauth`
+- Non-wildcard `CORS_ORIGINS`
+- A code-execution allowlist via `CODE_EXECUTION_REQUIRE_ALLOWLIST=1`, `CODE_EXECUTION_ALLOWED_TOOLS`, or `CODE_EXECUTION_ALLOWED_TOOL_PREFIXES`
+- Strong sandbox isolation; Node 25 protected runs fail closed when `isolated-vm` is unavailable
+
+For Redis-backed shared state:
+
+```bash
+STORE_BACKEND=redis
+REDIS_URL=redis://127.0.0.1:6379
+STORE_NAMESPACE=mcp-gateway
+```
+
+`remote-public` refuses to start unless `STORE_BACKEND=redis` is configured and reachable. Local and private deployments can keep the in-memory default, but memory stores are process-local and reset on restart.
+
+Before shipping a hardening change, run the full validation gate:
+
+```bash
+npm run typecheck
+npm test
+npm run lint
+npm run build
+```
+
 ## Endpoints
 
 ### Core Endpoints
